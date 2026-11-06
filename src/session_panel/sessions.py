@@ -2,11 +2,13 @@
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psutil
 
 FILETIME_TO_UNIX_S = 11644473600
+LSTART_FORMAT = "%a %b %d %H:%M:%S %Y"
 START_TOLERANCE_S = 1.0
 STOP_WAIT_S = 3
 
@@ -85,8 +87,13 @@ def read_session_files(directory: Path) -> tuple[list[SessionFile], set[int]]:
 
 
 def _expected_start(proc_start: str | None) -> float | None:
+    """Claude stores a FILETIME on Windows, and `ps -o lstart=` under LC_ALL=C TZ=UTC on macOS."""
     try:
         return int(proc_start) / 1e7 - FILETIME_TO_UNIX_S
+    except (TypeError, ValueError):
+        pass
+    try:
+        return datetime.strptime(proc_start, LSTART_FORMAT).replace(tzinfo=timezone.utc).timestamp()
     except (TypeError, ValueError):
         return None
 

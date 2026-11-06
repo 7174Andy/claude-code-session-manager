@@ -1,23 +1,31 @@
+import sys
+
 import pytest
-import winotify
 
 from session_panel import notify
 from session_panel.model import Event
-from session_panel.notify import clean_toast_text, send_toast, windows_accepts_toasts
+from session_panel.notify import accepts_toasts, clean_toast_text, send_toast
 
 
 @pytest.mark.parametrize("state, accepts", [(5, True), (2, False), (3, False), (4, False), (6, False), (7, False)])
 def test_only_the_accepting_state_counts_as_accepting(monkeypatch, state, accepts):
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(notify, "_notification_state", lambda: state)
-    assert windows_accepts_toasts() is accepts
+    assert accepts_toasts() is accepts
 
 
 def test_failed_state_query_assumes_quiet_so_the_alert_still_shows(monkeypatch):
     def boom():
         raise OSError("no shell32")
 
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(notify, "_notification_state", boom)
-    assert windows_accepts_toasts() is False
+    assert accepts_toasts() is False
+
+
+def test_mac_never_asks_for_the_alert_window(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert accepts_toasts() is True
 
 
 def test_clean_removes_powershell_syntax():
@@ -45,15 +53,43 @@ class _Recorder:
 
 
 def test_send_toast_cleans_text(monkeypatch):
+    winotify = pytest.importorskip("winotify")
     _Recorder.made = []
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(winotify, "Notification", _Recorder)
     send_toast(Event('x "is" done', "Ran 3 min. $(bad)"))
     assert _Recorder.made == [("Claude Sessions", "x is done", "Ran 3 min. bad")]
 
 
 def test_send_toast_swallows_errors(monkeypatch):
+    winotify = pytest.importorskip("winotify")
+
     def boom(*args, **kwargs):
         raise OSError("no powershell")
 
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(winotify, "Notification", boom)
+    send_toast(Event("t", "b"))
+
+
+def test_mac_toast_cannot_break_out_of_the_applescript_string(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(notify.subprocess, "run", lambda command, **kwargs: calls.append(command))
+    send_toast(Event('실험 "done"', 'path\\" & do shell script "rm x'))
+    assert calls == [
+        [
+            "osascript",
+            "-e",
+            'display notification "path\\\\ do shell script rm x" with title "실험 done"',
+        ]
+    ]
+
+
+def test_mac_toast_swallows_errors(monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("no osascript")
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(notify.subprocess, "run", boom)
     send_toast(Event("t", "b"))

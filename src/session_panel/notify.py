@@ -1,10 +1,10 @@
-"""Send Windows notifications."""
+"""Send desktop notifications."""
 
 import ctypes
 import logging
 import re
-
-import winotify
+import subprocess
+import sys
 
 APP_ID = "Claude Sessions"
 PLACEHOLDER = "No recap yet"
@@ -26,9 +26,13 @@ def _notification_state() -> int:
     return state.value
 
 
-def windows_accepts_toasts() -> bool:
+def accepts_toasts() -> bool:
     """False while Windows would hold a notification back, such as during fullscreen.
     If the state can't be read, assume quiet: a redundant alert beats a missed one."""
+    # shortcut: macOS has no public API for Focus state, and pywebview's show() would pull the alert
+    # window's app to the front, so Focus can hold a banner back; upgrade with a non-activating NSPanel.
+    if sys.platform == "darwin":
+        return True
     try:
         return _notification_state() == QUNS_ACCEPTS_NOTIFICATIONS
     except Exception:
@@ -43,13 +47,23 @@ def clean_toast_text(text: str, limit: int = 180) -> str:
     return cleaned or PLACEHOLDER
 
 
+def _applescript_text(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _show(title: str, body: str) -> None:
+    if sys.platform == "darwin":
+        script = f"display notification {_applescript_text(body)} with title {_applescript_text(title)}"
+        subprocess.run(["osascript", "-e", script], check=True, capture_output=True, timeout=10)
+    else:
+        import winotify  # only installed on Windows
+
+        winotify.Notification(app_id=APP_ID, title=title, msg=body).show()
+
+
 def send_toast(event) -> None:
     """Show a notification. A failure is logged, never raised: the panel must keep running."""
     try:
-        winotify.Notification(
-            app_id=APP_ID,
-            title=clean_toast_text(event.title),
-            msg=clean_toast_text(event.body),
-        ).show()
+        _show(clean_toast_text(event.title), clean_toast_text(event.body))
     except Exception:
         log.exception("Could not show notification")

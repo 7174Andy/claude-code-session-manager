@@ -1,5 +1,6 @@
 """The icon by the clock, which shows session status while the panel is hidden."""
 
+import sys
 import threading
 from collections.abc import Callable
 
@@ -29,7 +30,8 @@ def _line(row: Row) -> str:
     text = f"{row.name}: {row.badge}" + (f", {row.time_text}" if row.time_text else "")
     if len(text) > MAX_LINE:
         text = text[: MAX_LINE - 1] + "…"
-    return text.replace("&", "&&")  # a single & would underline the next letter in a menu
+    # A single & would underline the next letter in a Windows menu. macOS menus show it literally.
+    return text if sys.platform == "darwin" else text.replace("&", "&&")
 
 
 def status_lines(rows: list[Row]) -> list[str]:
@@ -51,15 +53,26 @@ def draw_icon(attention: int, active: bool) -> Image.Image:
     return image
 
 
+def _ui_runner() -> Callable:
+    """AppKit only allows status bar changes on the main thread, which pywebview's loop owns."""
+    if sys.platform == "darwin":
+        from PyObjCTools.AppHelper import callAfter  # only installed on macOS
+
+        return callAfter
+    return lambda action, *args: action(*args)
+
+
 class Tray:
     def __init__(
         self,
         open_panel: Callable[[], None],
         quit_app: Callable[[], None],
         icon_class=pystray.Icon,
+        on_ui: Callable | None = None,
     ) -> None:
         self._open_panel = open_panel
         self._quit_app = quit_app
+        self._on_ui = on_ui or _ui_runner()
         self._lines: list[str] = []
         self._look: tuple[int, bool] = (0, False)
         self._icon = icon_class(
@@ -88,13 +101,16 @@ class Tray:
         return run
 
     def start(self) -> None:
-        self._icon.run_detached()
+        self._icon.run_detached(lambda icon: self._on_ui(setattr, icon, "visible", True))
 
     def stop(self) -> None:
         """Required at exit: the icon's thread would otherwise keep the app alive."""
         self._icon.stop()
 
     def update(self, rows: list[Row]) -> None:
+        self._on_ui(self._apply, rows)
+
+    def _apply(self, rows: list[Row]) -> None:
         self._icon.title = tooltip(rows)
         look = (need_attention_count(rows), bool(rows))
         if look != self._look:

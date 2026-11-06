@@ -12,7 +12,7 @@ import webview
 
 from session_panel.estimate import ProjectScan
 from session_panel.model import Event, Observation, Row, Tracker, need_attention_count
-from session_panel.notify import send_toast, windows_accepts_toasts
+from session_panel.notify import accepts_toasts, send_toast
 from session_panel.sessions import is_alive, read_session_files, stop_session
 from session_panel.store import default_state_path, load_state, save_state
 from session_panel.transcript import find_transcript
@@ -213,11 +213,11 @@ def deliver(
     event: Event,
     alerts: Alerts,
     now: float,
-    accepts: Callable[[], bool] = windows_accepts_toasts,
+    accepts: Callable[[], bool] = accepts_toasts,
     toast: Callable[[Event], None] = send_toast,
 ) -> None:
-    """Always send the Windows notification, which also keeps it in the notification center,
-    and add our own alert when Windows wouldn't pop it up."""
+    """Always send the system notification, which also keeps it in the notification center,
+    and add our own alert when the system wouldn't pop it up."""
     threading.Thread(target=toast, args=(event,), daemon=True).start()
     if not accepts():
         alerts.show(event, now)

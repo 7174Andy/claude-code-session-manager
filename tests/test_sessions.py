@@ -4,12 +4,13 @@ import subprocess
 import sys
 import textwrap
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psutil
 import pytest
 
-from session_panel.sessions import is_alive, read_session_files, stop_session
+from session_panel.sessions import _expected_start, is_alive, read_session_files, stop_session
 
 REAL = {
     "pid": 29584,
@@ -62,6 +63,22 @@ def test_half_written_file_is_reported_not_dropped(tmp_path):
 
 def test_is_alive_false_when_start_time_differs():
     assert not is_alive(os.getpid(), WRONG_START)
+
+
+def lstart_of(pid):
+    return time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(psutil.Process(pid).create_time()))
+
+
+def test_mac_start_time_parses_a_space_padded_day_as_utc():
+    expected = datetime(2026, 11, 5, 12, 34, 56, tzinfo=timezone.utc).timestamp()
+    assert _expected_start("Thu Nov  5 12:34:56 2026") == expected
+
+
+def test_mac_start_time_proves_identity(sleeper):
+    assert is_alive(sleeper.pid, lstart_of(sleeper.pid))
+    assert not is_alive(sleeper.pid, "Thu Nov  5 12:34:56 2020")
+    assert stop_session(sleeper.pid, lstart_of(sleeper.pid)) is True
+    assert sleeper.wait(timeout=5) is not None
 
 
 def test_stop_session_stops_process_and_its_child(tmp_path):

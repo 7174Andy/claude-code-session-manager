@@ -88,11 +88,13 @@ No reply does not notify. Past gaps of 3–5 minutes nearly always ended in a no
 
 ## Persistence
 
-`%LOCALAPPDATA%\ClaudeSessionPanel\state.json` keeps tracked sessions and cleared keys, so Done and Crashed rows survive restarts and Claude's own cleanup of session files. A missing or corrupt file means starting empty.
+`%LOCALAPPDATA%\ClaudeSessionPanel\state.json` (on macOS, `~/Library/Application Support/ClaudeSessionPanel/state.json`) keeps tracked sessions and cleared keys, so Done and Crashed rows survive restarts and Claude's own cleanup of session files. A missing or corrupt file means starting empty.
 
 ## Tech
 
-Python with `pywebview` (the panel is an HTML page in an Edge WebView2 window, styled like the Layout A mockup), `psutil`, `winotify`, and `pystray` with `Pillow` for the tray icon, managed and run with `uv`. Windows only.
+Python with `pywebview` (the panel is an HTML page in an Edge WebView2 window, styled like the Layout A mockup), `psutil`, `winotify`, and `pystray` with `Pillow` for the tray icon, managed and run with `uv`. Runs on Windows and macOS.
+
+On macOS the page runs in WKWebView, the icon sits in the menu bar, and notifications go through `osascript`. Claude stores `procStart` there as `ps -o lstart=` text in UTC instead of a FILETIME. macOS has no public Focus state and `pywebview` activates the app when showing a window, so the app's own alert is never shown on macOS.
 
 Session names and recaps come from transcripts and can contain anything, so the page always shows them as plain text, never as HTML. The page loads nothing from the network.
 

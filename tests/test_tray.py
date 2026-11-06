@@ -1,3 +1,4 @@
+import sys
 import threading
 
 from session_panel.model import Kind, Row
@@ -29,8 +30,14 @@ def test_status_lines_show_name_badge_and_time():
     ]
 
 
-def test_status_lines_keep_ampersands_literal_in_a_windows_menu():
+def test_status_lines_keep_ampersands_literal_in_a_windows_menu(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
     assert status_lines([row("a&b", time_text="")]) == ["a&&b: Working"]
+
+
+def test_status_lines_leave_ampersands_alone_in_a_mac_menu(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert status_lines([row("a&b", time_text="")]) == ["a&b: Working"]
 
 
 def test_status_lines_are_capped_and_say_how_many_more():
@@ -58,8 +65,8 @@ class FakeIcon:
         self.calls = []
         FakeIcon.instance = self
 
-    def run_detached(self):
-        self.calls.append("run_detached")
+    def run_detached(self, setup):
+        setup(self)
 
     def stop(self):
         self.calls.append("stop")
@@ -68,13 +75,27 @@ class FakeIcon:
         self.calls.append("update_menu")
 
 
-def make_tray(opened=None, quit_called=None):
+def make_tray(opened=None, quit_called=None, on_ui=lambda action, *args: action(*args)):
     tray = Tray(
         (opened or threading.Event()).set,
         (quit_called or threading.Event()).set,
         icon_class=FakeIcon,
+        on_ui=on_ui,
     )
     return tray, FakeIcon.instance
+
+
+def test_icon_changes_wait_for_the_ui_thread():
+    queued = []
+    tray, icon = make_tray(on_ui=lambda action, *args: queued.append((action, args)))
+    title = icon.title
+    tray.start()
+    tray.update([row()])
+    assert not hasattr(icon, "visible") and icon.title == title
+    for action, args in queued:
+        action(*args)
+    assert icon.visible is True
+    assert icon.title == "1 session, 0 need attention"
 
 
 def menu_items(icon):

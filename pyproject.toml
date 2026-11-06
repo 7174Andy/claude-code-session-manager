@@ -12,7 +12,7 @@ dependencies = [
     "psutil>=7.2.2",
     "pystray>=0.19.5",
     "pywebview>=6.2.1",
-    "winotify>=1.1.0",
+    "winotify>=1.1.0; sys_platform == 'win32'",
 ]
 
 [project.gui-scripts]

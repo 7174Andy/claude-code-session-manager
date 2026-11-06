@@ -2,11 +2,16 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 
 
 def default_state_path() -> Path:
-    return Path(os.environ["LOCALAPPDATA"]) / "ClaudeSessionPanel" / "state.json"
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ["LOCALAPPDATA"])
+    return base / "ClaudeSessionPanel" / "state.json"
 
 
 def load_state(path: Path) -> dict | None:
