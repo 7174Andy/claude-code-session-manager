@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!-- pywebview's evaluate_js and API replies go through eval, which macOS's WKWebView blocks without unsafe-eval. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'unsafe-eval'">
 <title>Session alert</title>
 <style>
   :root { --bg: #262a31; --line: #3a404a; --text: #eceef1; --muted: #a7aeb9; color-scheme: dark; }
