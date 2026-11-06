@@ -11,11 +11,12 @@ from pathlib import Path
 import webview
 
 from session_panel.estimate import ProjectScan
-from session_panel.model import Event, Kind, Observation, Row, Tracker
+from session_panel.model import Event, Observation, Row, Tracker, need_attention_count
 from session_panel.notify import send_toast, windows_accepts_toasts
 from session_panel.sessions import is_alive, read_session_files, stop_session
 from session_panel.store import default_state_path, load_state, save_state
 from session_panel.transcript import find_transcript
+from session_panel.tray import Tray
 
 POLL_S = 2
 PANEL_WIDTH = 350
@@ -26,7 +27,6 @@ ALERT_HEIGHT = 110
 ALERT_MARGIN = 16
 ALERT_BOTTOM = 64
 ALERT_SECONDS = 10
-ATTENTION = {Kind.NEEDS_YOU, Kind.CRASHED, Kind.DONE}
 
 log = logging.getLogger(__name__)
 
@@ -67,10 +67,6 @@ class Collector:
                 return None
             project = self._project_of[session_id] = transcript.parent
         return project
-
-
-def need_attention_count(rows: list[Row]) -> int:
-    return sum(row.kind in ATTENTION for row in rows)
 
 
 def page_payload(rows: list[Row]) -> dict:
@@ -135,7 +131,7 @@ class Controller:
 
 
 class AppLifetime:
-    """The window's X minimizes, so tracking and alerts keep going. Only Quit ends the app."""
+    """The window's X hides it, so tracking and alerts keep going. Only Quit ends the app."""
 
     def __init__(self, window, confirm: Callable[[str], bool]) -> None:
         self._window = window
@@ -146,8 +142,8 @@ class AppLifetime:
         """pywebview's closing handler: returning False cancels the close."""
         if self._quitting:
             return True
-        # Windows Forms ignores a minimize during its closing event, so do it just after.
-        threading.Thread(target=self._window.minimize, daemon=True).start()
+        # Windows Forms can ignore window changes during its closing event, so do it just after.
+        threading.Thread(target=self._window.hide, daemon=True).start()
         return False
 
     def quit(self) -> None:
@@ -260,7 +256,7 @@ def alert_html() -> str:
 
 
 def _poll_loop(
-    window, alert_window, alerts: Alerts, collector: Collector, controller: Controller, state_path: Path
+    window, alert_window, alerts: Alerts, tray: Tray, collector: Collector, controller: Controller, state_path: Path
 ) -> None:
     window.events.loaded.wait()
     alert_window.events.loaded.wait()
@@ -277,6 +273,7 @@ def _poll_loop(
             if state != saved:
                 save_state(state_path, controller.snapshot())
                 saved = state
+            tray.update(rows)
         except Exception:
             log.exception("Poll failed")
         controller.changed.wait(POLL_S)
@@ -305,7 +302,7 @@ def main() -> None:
         "Sessions",
         html=panel_html(),
         js_api=PanelApi(controller, quit_app),
-        minimized=True,
+        hidden=True,
         **panel_geometry(screen.width, screen.height),
     )
     lifetime = AppLifetime(window, lambda message: window.create_confirmation_dialog("Quit", message))
@@ -325,5 +322,10 @@ def main() -> None:
     alerts = Alerts(alert_window)
     alert_api = AlertApi(window, alerts)
     alert_window.expose(alert_api.open, alert_api.dismiss)
+    tray = Tray(alert_api.open, quit_app)
     collector = Collector(Path.home() / ".claude")
-    webview.start(_poll_loop, (window, alert_window, alerts, collector, controller, state_path))
+    tray.start()
+    try:
+        webview.start(_poll_loop, (window, alert_window, alerts, tray, collector, controller, state_path))
+    finally:
+        tray.stop()

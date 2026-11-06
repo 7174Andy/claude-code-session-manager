@@ -143,13 +143,13 @@ class FakeWindow:
         self.calls.append(f"on_top={value}")
 
 
-def test_close_button_minimizes_instead_of_quitting():
+def test_close_button_hides_instead_of_quitting():
     window = FakeWindow()
     assert AppLifetime(window, lambda message: True).closing() is False
     deadline = time.time() + 5
     while not window.calls and time.time() < deadline:
         time.sleep(0.01)
-    assert window.calls == ["minimize"]
+    assert window.calls == ["hide"]
 
 
 def test_confirmed_quit_really_closes():

@@ -35,6 +35,8 @@ class Kind(Enum):
     UNKNOWN = "unknown"
 
 
+ATTENTION = {Kind.NEEDS_YOU, Kind.CRASHED, Kind.DONE}
+
 _RANK = {
     Kind.NEEDS_YOU: 0,
     Kind.CRASHED: 1,
@@ -73,6 +75,10 @@ class Row:
 class Event:
     title: str
     body: str
+
+
+def need_attention_count(rows: list[Row]) -> int:
+    return sum(row.kind in ATTENTION for row in rows)
 
 
 @dataclass
