@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<!-- unsafe-eval: pywebview's evaluate_js runs scripts through eval(), and WebKit enforces this policy on it. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'unsafe-eval'">
 <title>Session alert</title>
 <style>
   :root { --bg: #262a31; --line: #3a404a; --text: #eceef1; --muted: #a7aeb9; color-scheme: dark; }

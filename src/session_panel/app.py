@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -148,8 +149,11 @@ class AppLifetime:
 
     def quit(self) -> None:
         if self._confirm("Quit? Sessions stop being tracked and you won't get alerts."):
-            self._quitting = True
-            self._window.destroy()
+            self.quit_now()
+
+    def quit_now(self) -> None:
+        self._quitting = True
+        self._window.destroy()
 
 
 class PanelApi:
@@ -321,10 +325,13 @@ def main() -> None:
     alerts = Alerts(alert_window)
     alert_api = AlertApi(window, alerts)
     alert_window.expose(alert_api.open, alert_api.dismiss)
-    tray = Tray(alert_api.open, quit_app)
+    tray = Tray(alert_api.open, lifetime.quit_now)
     collector = Collector(Path.home() / ".claude")
     tray.start()
     try:
         webview.start(_poll_loop, (window, alert_window, alerts, tray, collector, controller, state_path))
     finally:
         tray.stop()
+    # On macOS, pywebview's thread answering the Quit click waits forever once the windows have
+    # closed, and Python won't exit while it's alive. State is saved and the poll loop is done.
+    os._exit(0)
