@@ -2,6 +2,7 @@
 so every check runs inside one window session and is asserted afterwards."""
 
 import json
+import threading
 import time
 
 import webview
@@ -151,6 +152,14 @@ def run_alert_checks(window, api, out):
     out["alert_click_opened"] = _wait_true(lambda: api.opened == 1)
 
 
+def wait_for_page_calls():
+    """pywebview answers each page call on its own thread. If the windows close before it has,
+    that thread blocks forever on macOS and the test process can't exit."""
+    for thread in threading.enumerate():
+        if thread not in (threading.current_thread(), threading.main_thread()) and not thread.daemon:
+            thread.join(5)
+
+
 def test_page_behaviour():
     api = FakeApi()
     alert_api = FakeAlertApi()
@@ -167,6 +176,7 @@ def test_page_behaviour():
         except Exception as error:  # noqa: BLE001 - any failure here must reach the assert on the main thread
             out["error"] = repr(error)
         finally:
+            wait_for_page_calls()
             alert.destroy()
             window.destroy()
 

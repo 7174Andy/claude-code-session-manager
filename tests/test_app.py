@@ -171,6 +171,16 @@ def test_declined_quit_keeps_running():
     assert lifetime.closing() is False
 
 
+def test_quit_now_closes_without_asking():
+    window = FakeWindow()
+    asked = []
+    lifetime = AppLifetime(window, lambda message: asked.append(message) or True)
+    lifetime.quit_now()
+    assert asked == []
+    assert window.calls == ["destroy"]
+    assert lifetime.closing() is True
+
+
 def test_alert_hides_only_after_its_time_is_up():
     window = FakeWindow()
     alerts = Alerts(window)
