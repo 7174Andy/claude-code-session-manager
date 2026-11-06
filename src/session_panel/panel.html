@@ -17,9 +17,10 @@
     background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
   }
   header {
-    display: flex; justify-content: space-between; gap: 12px; padding: 9px 14px;
+    display: flex; align-items: center; gap: 12px; padding: 9px 14px;
     border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px;
   }
+  #attention { margin-left: auto; }
   #warning {
     display: none; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 8px 14px;
     border-bottom: 1px solid var(--line); color: var(--crash); font-size: 13px;
@@ -55,7 +56,7 @@
 </style>
 </head>
 <body>
-<header><span>Sessions</span><span id="attention">0 need attention</span></header>
+<header><span>Sessions</span><span id="attention">0 need attention</span><button type="button" id="quit">Quit</button></header>
 <div id="warning" role="alert"><span id="warning-text"></span><button type="button" id="warning-close">Dismiss</button></div>
 <div id="list"><div class="empty">No Claude Code sessions running</div></div>
 <script>
@@ -81,6 +82,7 @@
   }
 
   document.getElementById("warning-close").addEventListener("click", () => warning.classList.remove("shown"));
+  document.getElementById("quit").addEventListener("click", () => window.pywebview.api.quit());
 
   async function clearSession(key, button) {
     button.disabled = true;

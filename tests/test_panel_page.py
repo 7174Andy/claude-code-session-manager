@@ -24,6 +24,9 @@ class FakeApi:
         self.cleared.append(key)
         return {"warning": self.warning}
 
+    def quit(self):
+        self.quit_calls = getattr(self, "quit_calls", 0) + 1
+
 
 def wait_for(window, expression, seconds=10):
     deadline = time.time() + seconds
@@ -88,6 +91,9 @@ def run_checks(window, api, out):
     out["evil_recap"] = js("document.querySelector('.recap').textContent")
     out["evil_img"] = js("document.querySelectorAll('img').length")
     out["evil_ran"] = js("window.hacked === 1")
+
+    js("document.getElementById('quit').click()")
+    out["quit_reached_api"] = _wait_true(lambda: getattr(api, "quit_calls", 0) == 1)
 
 
 def _wait_true(check, seconds=5):
@@ -193,3 +199,4 @@ def test_page_behaviour():
     assert out["evil_recap"] == EVIL
     assert out["evil_img"] == 0
     assert out["evil_ran"] is False
+    assert out["quit_reached_api"] is True

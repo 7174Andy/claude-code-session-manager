@@ -6,13 +6,13 @@ The user runs many Claude Code sessions at once, one terminal per task, and drif
 
 ## Product
 
-A slim Windows desktop window (Layout A) that lists every Claude Code session on the computer, showing each session's state and how long the wait is, so the user can pick a video that fits. It starts minimized to the taskbar and keeps tracking there, so it stays off the screen until the user opens it or a session needs them. Closing the window quits the app and stops notifications.
+A slim Windows desktop window (Layout A) that lists every Claude Code session on the computer, showing each session's state and how long the wait is, so the user can pick a video that fits. It starts minimized to the taskbar and keeps tracking there, so it stays off the screen until the user opens it or a session needs them. The window's X minimizes it to the taskbar. Only the header's `Quit` button ends the app, after a confirmation, since that stops tracking and alerts.
 
 It is a separate window, not a Chrome panel.
 
 ## Layout A
 
-- Window 350 by 600 px at the bottom right above the taskbar, not always on top, with a header reading `Sessions` on the left and `N need attention` on the right. N counts Needs you, Crashed and Done rows.
+- Window 350 by 600 px at the bottom right above the taskbar, not always on top, with a header reading `Sessions` on the left and `N need attention` and a `Quit` button on the right. N counts Needs you, Crashed and Done rows.
 - Each row has two lines: session name (monospace) and time on the first, colored status badge and `Clear` button on the second.
 - Clicking a row shows or hides its recap.
 - The list scrolls when it is taller than the window.

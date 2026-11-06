@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 
 import psutil
 
@@ -8,6 +9,7 @@ from session_panel.app import (
     ALERT_SECONDS,
     AlertApi,
     Alerts,
+    AppLifetime,
     Collector,
     Controller,
     PanelApi,
@@ -126,6 +128,12 @@ class FakeWindow:
     def restore(self):
         self.calls.append("restore")
 
+    def minimize(self):
+        self.calls.append("minimize")
+
+    def destroy(self):
+        self.calls.append("destroy")
+
     @property
     def on_top(self):
         return False
@@ -133,6 +141,34 @@ class FakeWindow:
     @on_top.setter
     def on_top(self, value):
         self.calls.append(f"on_top={value}")
+
+
+def test_close_button_minimizes_instead_of_quitting():
+    window = FakeWindow()
+    assert AppLifetime(window, lambda message: True).closing() is False
+    deadline = time.time() + 5
+    while not window.calls and time.time() < deadline:
+        time.sleep(0.01)
+    assert window.calls == ["minimize"]
+
+
+def test_confirmed_quit_really_closes():
+    window = FakeWindow()
+    asked = []
+    lifetime = AppLifetime(window, lambda message: asked.append(message) or True)
+    lifetime.quit()
+    assert asked == ["Quit? Sessions stop being tracked and you won't get alerts."]
+    assert window.calls == ["destroy"]
+    assert lifetime.closing() is True
+    assert window.calls == ["destroy"]
+
+
+def test_declined_quit_keeps_running():
+    window = FakeWindow()
+    lifetime = AppLifetime(window, lambda message: False)
+    lifetime.quit()
+    assert window.calls == []
+    assert lifetime.closing() is False
 
 
 def test_alert_hides_only_after_its_time_is_up():
@@ -252,6 +288,6 @@ def test_clear_does_not_raise_a_crash_alert_while_stopping():
     assert events_during_stop == []
 
 
-def test_panel_api_exposes_only_clear():
+def test_panel_api_exposes_only_clear_and_quit():
     controller, _ = controller_with_row(Fakes())
-    assert [n for n in dir(PanelApi(controller)) if not n.startswith("_")] == ["clear"]
+    assert [n for n in dir(PanelApi(controller)) if not n.startswith("_")] == ["clear", "quit"]

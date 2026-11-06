@@ -134,16 +134,42 @@ class Controller:
         return None
 
 
-class PanelApi:
-    """What the page may call. Public members are exposed to the page, so only clear is public."""
+class AppLifetime:
+    """The window's X minimizes, so tracking and alerts keep going. Only Quit ends the app."""
 
-    def __init__(self, controller: Controller) -> None:
+    def __init__(self, window, confirm: Callable[[str], bool]) -> None:
+        self._window = window
+        self._confirm = confirm
+        self._quitting = False
+
+    def closing(self) -> bool:
+        """pywebview's closing handler: returning False cancels the close."""
+        if self._quitting:
+            return True
+        # Windows Forms ignores a minimize during its closing event, so do it just after.
+        threading.Thread(target=self._window.minimize, daemon=True).start()
+        return False
+
+    def quit(self) -> None:
+        if self._confirm("Quit? Sessions stop being tracked and you won't get alerts."):
+            self._quitting = True
+            self._window.destroy()
+
+
+class PanelApi:
+    """What the page may call. Public members are exposed to the page, so keep this short."""
+
+    def __init__(self, controller: Controller, quit_app: Callable[[], None] = lambda: None) -> None:
         self._controller = controller
+        self._quit_app = quit_app
 
     def clear(self, key) -> dict:
         if not isinstance(key, str):
             return {"warning": None}
         return {"warning": self._controller.clear(key)}
+
+    def quit(self) -> None:
+        self._quit_app()
 
 
 class Alerts:
@@ -271,14 +297,19 @@ def main() -> None:
         return window.create_confirmation_dialog("Clear session", message)
 
     controller = Controller(Tracker(load_state(state_path), is_alive), confirm, stop_session)
+    def quit_app() -> None:
+        lifetime.quit()
+
     screen = webview.screens[0]
     window = webview.create_window(
         "Sessions",
         html=panel_html(),
-        js_api=PanelApi(controller),
+        js_api=PanelApi(controller, quit_app),
         minimized=True,
         **panel_geometry(screen.width, screen.height),
     )
+    lifetime = AppLifetime(window, lambda message: window.create_confirmation_dialog("Quit", message))
+    window.events.closing += lifetime.closing
     # Created hidden and shown on demand. It must never take focus from what the user is doing.
     alert_window = webview.create_window(
         "Session alert",
