@@ -1,0 +1,26 @@
+[project]
+name = "session-panel"
+version = "0.1.0"
+description = "Always-on-top panel listing every Claude Code session"
+readme = "README.md"
+authors = [
+    { name = "7174Andy", email = "hee031011@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "psutil>=7.2.2",
+    "pywebview>=6.2.1",
+    "winotify>=1.1.0",
+]
+
+[project.gui-scripts]
+session-panel = "session_panel.app:main"
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
