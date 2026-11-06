@@ -6,13 +6,13 @@ The user runs many Claude Code sessions at once, one terminal per task, and drif
 
 ## Product
 
-A slim, always-on-top Windows desktop window (Layout A) that lists every Claude Code session on the computer. At a glance it shows each session's state and how long the wait is, so the user can pick a video that fits. It sends a Windows notification when a session needs them.
+A slim Windows desktop window (Layout A) that lists every Claude Code session on the computer, showing each session's state and how long the wait is, so the user can pick a video that fits. It starts minimized to the taskbar and keeps tracking there, so it stays off the screen until the user opens it or a session needs them. Closing the window quits the app and stops notifications.
 
-It is a separate window, not a Chrome panel, so it stays visible over Chrome and terminals. Fullscreen YouTube may cover it, and notifications may not pop up then (see Known limits).
+It is a separate window, not a Chrome panel.
 
 ## Layout A
 
-- Window 350 px wide, always on top, with a header reading `Sessions` on the left and `N need attention` on the right. N counts Needs you, Crashed and Done rows.
+- Window 350 by 600 px at the bottom right above the taskbar, not always on top, with a header reading `Sessions` on the left and `N need attention` on the right. N counts Needs you, Crashed and Done rows.
 - Each row has two lines: session name (monospace) and time on the first, colored status badge and `Clear` button on the second.
 - Clicking a row shows or hides its recap.
 - The list scrolls when it is taller than the window.
@@ -63,7 +63,7 @@ Estimating from simulated time is left out because a run's end time could not be
 
 ## Notifications
 
-Standard Windows toasts.
+Every notification is sent as a standard Windows toast. When Windows reports any state other than accepting notifications, such as during fullscreen, it holds toasts back, so the app also shows its own alert: a small always-on-top window in the bottom-right corner, for 10 seconds, that doesn't take focus. Clicking it brings the panel to the front; `✕` dismisses it. Alerts arriving together show the newest with `and N more`.
 
 - **Done:** moving to `idle` after at least 120 seconds of work. Work starts when a session leaves `idle`, and `shell` counts as still working. Title `<name> is done`, body `Ran 14 min. <recap>`.
 - **Crashed:** title `<name> crashed`, body is the recap.
@@ -104,4 +104,4 @@ Jumping to a session's terminal, sending prompts from the panel, phone alerts, l
 - A closed tab may still look alive until cleared.
 - These files are Claude Code internals, so an update could change them. Unknown values should display rather than crash.
 - Permission prompts are rare because the user runs in auto mode.
-- While Windows reports a fullscreen or busy state, notifications go silently to the notification center and don't pop up. Observed on 2026-11-05 with the state reporting busy; both test notifications were delivered to the history but neither appeared on screen.
+- While Windows reports a fullscreen or busy state, its own notifications go silently to the notification center and don't pop up, which is why the app's own alert exists. Observed on 2026-11-05 with the state reporting busy.

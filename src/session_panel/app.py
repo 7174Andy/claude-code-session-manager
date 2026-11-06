@@ -12,14 +12,20 @@ import webview
 
 from session_panel.estimate import ProjectScan
 from session_panel.model import Event, Kind, Observation, Row, Tracker
-from session_panel.notify import send_toast
+from session_panel.notify import send_toast, windows_accepts_toasts
 from session_panel.sessions import is_alive, read_session_files, stop_session
 from session_panel.store import default_state_path, load_state, save_state
 from session_panel.transcript import find_transcript
 
 POLL_S = 2
 PANEL_WIDTH = 350
+PANEL_HEIGHT = 600
 TASKBAR_ALLOWANCE = 80
+ALERT_WIDTH = 340
+ALERT_HEIGHT = 110
+ALERT_MARGIN = 16
+ALERT_BOTTOM = 64
+ALERT_SECONDS = 10
 ATTENTION = {Kind.NEEDS_YOU, Kind.CRASHED, Kind.DONE}
 
 log = logging.getLogger(__name__)
@@ -140,19 +146,107 @@ class PanelApi:
         return {"warning": self._controller.clear(key)}
 
 
+class Alerts:
+    """The app's own alert window, for when Windows would hold a notification back."""
+
+    def __init__(self, window) -> None:
+        self._window = window
+        self._until: float | None = None
+
+    def show(self, event: Event, now: float) -> None:
+        payload = {"title": event.title, "body": event.body}
+        self._window.evaluate_js(f"showAlert({json.dumps(payload)})")
+        self._window.show()
+        self._until = now + ALERT_SECONDS
+
+    def tick(self, now: float) -> None:
+        if self._until is not None and now >= self._until:
+            self.dismiss()
+
+    def dismiss(self) -> None:
+        self._until = None
+        self._window.hide()
+        self._window.evaluate_js("resetAlert()")
+
+
+class AlertApi:
+    """What the alert page may call. Public members are exposed to the page."""
+
+    def __init__(self, panel, alerts: Alerts) -> None:
+        self._panel = panel
+        self._alerts = alerts
+
+    def open(self) -> None:
+        self._panel.restore()
+        self._panel.show()
+        # Restoring alone can leave it behind a fullscreen window, so raise it past that.
+        self._panel.on_top = True
+        self._panel.on_top = False
+        self._alerts.dismiss()
+
+    def dismiss(self) -> None:
+        self._alerts.dismiss()
+
+
+def deliver(
+    event: Event,
+    alerts: Alerts,
+    now: float,
+    accepts: Callable[[], bool] = windows_accepts_toasts,
+    toast: Callable[[Event], None] = send_toast,
+) -> None:
+    """Always send the Windows notification, which also keeps it in the notification center,
+    and add our own alert when Windows wouldn't pop it up."""
+    threading.Thread(target=toast, args=(event,), daemon=True).start()
+    if not accepts():
+        alerts.show(event, now)
+
+
+def panel_geometry(screen_width: int, screen_height: int) -> dict:
+    height = min(PANEL_HEIGHT, screen_height - TASKBAR_ALLOWANCE)
+    return {
+        "width": PANEL_WIDTH,
+        "height": height,
+        "x": screen_width - PANEL_WIDTH,
+        "y": screen_height - TASKBAR_ALLOWANCE - height,
+    }
+
+
+def alert_geometry(screen_width: int, screen_height: int) -> dict:
+    return {
+        "width": ALERT_WIDTH,
+        "height": ALERT_HEIGHT,
+        "x": screen_width - ALERT_WIDTH - ALERT_MARGIN,
+        "y": screen_height - ALERT_HEIGHT - ALERT_BOTTOM,
+    }
+
+
+def _page(name: str) -> str:
+    return resources.files("session_panel").joinpath(name).read_text(encoding="utf-8")
+
+
 def panel_html() -> str:
-    return resources.files("session_panel").joinpath("panel.html").read_text(encoding="utf-8")
+    return _page("panel.html")
 
 
-def _poll_loop(window, collector: Collector, controller: Controller, state_path: Path) -> None:
+def alert_html() -> str:
+    return _page("alert.html")
+
+
+def _poll_loop(
+    window, alert_window, alerts: Alerts, collector: Collector, controller: Controller, state_path: Path
+) -> None:
     window.events.loaded.wait()
+    alert_window.events.loaded.wait()
     saved = None
     while not window.events.closed.is_set():
         try:
-            rows, events = controller.apply(collector.collect(), time.time())
-            window.evaluate_js(f"render({json.dumps(page_payload(rows))})")
+            now = time.time()
+            rows, events = controller.apply(collector.collect(), now)
             for event in events:
-                threading.Thread(target=send_toast, args=(event,), daemon=True).start()
+                deliver(event, alerts, now)
+            alerts.tick(now)
+            window.evaluate_js(f"render({json.dumps(page_payload(rows))})")
             state = json.dumps(controller.snapshot(), sort_keys=True)
             if state != saved:
                 save_state(state_path, controller.snapshot())
@@ -161,6 +255,7 @@ def _poll_loop(window, collector: Collector, controller: Controller, state_path:
             log.exception("Poll failed")
         controller.changed.wait(POLL_S)
         controller.changed.clear()
+    alert_window.destroy()  # otherwise the hidden window would keep the app running
 
 
 def main() -> None:
@@ -181,11 +276,23 @@ def main() -> None:
         "Sessions",
         html=panel_html(),
         js_api=PanelApi(controller),
-        width=PANEL_WIDTH,
-        height=screen.height - TASKBAR_ALLOWANCE,
-        x=screen.width - PANEL_WIDTH,
-        y=0,
-        on_top=True,
+        minimized=True,
+        **panel_geometry(screen.width, screen.height),
     )
+    # Created hidden and shown on demand. It must never take focus from what the user is doing.
+    alert_window = webview.create_window(
+        "Session alert",
+        html=alert_html(),
+        hidden=True,
+        frameless=True,
+        on_top=True,
+        focus=False,
+        easy_drag=False,
+        resizable=False,
+        **alert_geometry(screen.width, screen.height),
+    )
+    alerts = Alerts(alert_window)
+    alert_api = AlertApi(window, alerts)
+    alert_window.expose(alert_api.open, alert_api.dismiss)
     collector = Collector(Path.home() / ".claude")
-    webview.start(_poll_loop, (window, collector, controller, state_path))
+    webview.start(_poll_loop, (window, alert_window, alerts, collector, controller, state_path))

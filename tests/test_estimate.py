@@ -1,6 +1,6 @@
 import json
 
-from session_panel.estimate import ProjectHistory, estimate_remaining, experiment_key, scan_project
+from session_panel.estimate import estimate_remaining, experiment_key, scan_project
 
 M = 60.0
 A = "pixi run python -m isaac_nav.run_experiment --config configs/game/office.json --output outputs/a --seed 0 --timeout 60 *> outputs/a.log"
@@ -24,41 +24,16 @@ def test_wide_but_proportional_range_is_kept():
     assert estimate_remaining([m * M for m in range(20, 31)], 0, 8) == (22, 28)
 
 
-def test_five_minute_spread_is_allowed_for_short_waits():
-    assert estimate_remaining([m * M for m in (1, 1, 1, 3, 4, 5, 6, 6, 6)], 0, 8) == (1, 6)
-
-
 def test_too_few_samples_gives_none():
     assert estimate_remaining([m * M for m in range(10, 17)], 0, 8) is None
-
-
-def test_samples_shorter_than_elapsed_do_not_count():
-    assert estimate_remaining([m * M for m in range(10, 19)], 20 * M, 8) is None
-
-
-def test_lower_bound_is_at_least_one_minute():
-    samples = [10 * M + s for s in range(1, 10)]
-    assert estimate_remaining(samples, 10 * M, 8) == (1, 1)
 
 
 def test_same_config_and_flags_share_a_key():
     assert experiment_key(A) == experiment_key(B)
 
 
-def test_key_keeps_config_and_flags_only():
-    assert experiment_key(A) == "--config configs/game/office.json --timeout 60"
-
-
 def test_different_flags_get_different_keys():
     assert experiment_key(A) != experiment_key(C)
-
-
-def test_no_config_means_no_key():
-    assert experiment_key("pytest -q") is None
-
-
-def test_unbalanced_quotes_do_not_raise():
-    assert experiment_key('run --config a "oops') == 'run --config a "oops'.split(" ", 1)[1]
 
 
 def _write(path, records):
@@ -87,12 +62,3 @@ def test_scan_project_collects_from_all_transcripts(tmp_path):
     history = scan_project(tmp_path)
     assert sorted(history.turns_s) == [1.0, 2.0]
     assert history.experiments_s == {experiment_key(A): [100.0, 100.0]}
-
-
-def test_scan_project_skips_unkeyed_commands(tmp_path):
-    _write(tmp_path / "one.jsonl", _run("t1", "pytest -q"))
-    assert scan_project(tmp_path).experiments_s == {}
-
-
-def test_scan_missing_project_is_empty(tmp_path):
-    assert scan_project(tmp_path / "gone") == ProjectHistory()

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Session alert</title>
+<style>
+  :root { --bg: #262a31; --line: #3a404a; --text: #eceef1; --muted: #a7aeb9; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.35 "Segoe UI", system-ui, sans-serif; }
+  #alert {
+    position: relative; display: grid; align-content: start; gap: 3px; height: 100%; padding: 10px 34px 10px 14px;
+    border: 1px solid var(--line); cursor: pointer;
+  }
+  #title { font: 600 13px Consolas, monospace; overflow-wrap: anywhere; }
+  #body {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+    color: var(--muted); overflow-wrap: anywhere;
+  }
+  #more { color: var(--muted); font-size: 12px; }
+  #close {
+    position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; padding: 0;
+    border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; cursor: pointer;
+  }
+  #close:hover { background: var(--line); color: var(--text); }
+</style>
+</head>
+<body>
+<div id="alert" role="alert">
+  <div id="title"></div>
+  <div id="body"></div>
+  <div id="more"></div>
+  <button type="button" id="close" aria-label="Dismiss">✕</button>
+</div>
+<script>
+  // Titles and bodies come from transcripts and can contain anything: textContent only.
+  const title = document.getElementById("title");
+  const body = document.getElementById("body");
+  const more = document.getElementById("more");
+  let earlier = 0;
+  let showing = false;
+
+  function showAlert(alert) {
+    if (showing) earlier += 1;
+    showing = true;
+    title.textContent = alert.title;
+    body.textContent = alert.body;
+    more.textContent = earlier ? "and " + earlier + " more" : "";
+  }
+
+  function resetAlert() {
+    earlier = 0;
+    showing = false;
+    more.textContent = "";
+  }
+
+  document.getElementById("alert").addEventListener("click", () => window.pywebview.api.open());
+  document.getElementById("close").addEventListener("click", (event) => {
+    event.stopPropagation();
+    window.pywebview.api.dismiss();
+  });
+</script>
+</body>
+</html>

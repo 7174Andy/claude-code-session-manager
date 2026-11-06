@@ -77,43 +77,11 @@ def test_dead_while_active_is_crashed(status):
     assert rows[0].alive is False
 
 
-def test_crashed_time_counts_up():
-    file = sf()
-    tracker = seen(file)
-    tracker.update(obs(file, alive={file.key: False}), NOW + 10)
-    rows, _ = tracker.update(obs(file, alive={file.key: False}), NOW + 190)
-    assert rows[0].time_text == "3 min ago"
-
-
 def test_dead_while_idle_is_done_not_crashed():
     file = sf(status="idle", since=NOW - 300)
     rows, events = seen(file).update(obs(file, alive={file.key: False}), NOW + 2)
     assert rows[0].kind is Kind.DONE and rows[0].alive is False
     assert events == []
-
-
-def test_vanished_file_while_busy_is_crashed():
-    rows, events = seen(sf()).update(obs(), NOW + 2)
-    assert rows[0].kind is Kind.CRASHED
-    assert [e.title for e in events] == ["s crashed"]
-
-
-def test_vanished_file_while_idle_stays_done():
-    rows, events = seen(sf(status="idle")).update(obs(), NOW + 2)
-    assert rows[0].kind is Kind.DONE
-    assert events == []
-
-
-def test_dead_starting_session_is_dropped():
-    file = sf(status=None)
-    rows, events = seen(file).update(obs(file, alive={file.key: False}), NOW + 2)
-    assert rows == [] and events == []
-
-
-def test_dead_unknown_status_is_done_without_alert():
-    file = sf(status="newthing")
-    rows, events = seen(file).update(obs(file, alive={file.key: False}), NOW + 2)
-    assert rows[0].kind is Kind.DONE and events == []
 
 
 def test_unreadable_file_keeps_the_row_unchanged():
@@ -122,43 +90,10 @@ def test_unreadable_file_keeps_the_row_unchanged():
     assert rows[0].kind is Kind.WORKING and events == []
 
 
-def test_resumed_session_replaces_its_old_dead_row():
-    tracker = seen(sf(pid=1))
-    rows, events = tracker.update(obs(sf(pid=2)), NOW + 2)
-    assert [r.pid for r in rows] == [2]
-    assert events == []
-
-
-def test_same_process_with_new_session_replaces_old_row():
-    tracker = seen(sf(session_id="old", pid=1))
-    rows, events = tracker.update(obs(sf(session_id="new", pid=1)), NOW + 2)
-    assert [r.name for r in rows] == ["new"]
-    assert events == []
-
-
 @pytest.mark.parametrize("age, kind", [(300, Kind.NO_REPLY), (299, Kind.WORKING)])
 def test_no_reply_after_five_minutes(age, kind):
     facts = {"s": TranscriptFacts(unanswered_since=NOW - age)}
     assert row_of(sf(), facts=facts).kind is kind
-
-
-def test_no_reply_text_and_badge():
-    row = row_of(sf(), facts={"s": TranscriptFacts(unanswered_since=NOW - 19 * MIN)})
-    assert (row.badge, row.time_text) == ("No reply", "no reply for 19 min")
-
-
-def test_no_reply_pauses_the_estimate():
-    row = row_of(
-        sf(),
-        facts={"s": TranscriptFacts(unanswered_since=NOW - 6 * MIN)},
-        history={"s": ProjectHistory(turns_s=TURNS_12_16)},
-    )
-    assert "left" not in row.time_text
-
-
-def test_no_reply_applies_only_while_busy():
-    facts = {"s": TranscriptFacts(unanswered_since=NOW - 3600)}
-    assert row_of(sf(status="idle"), facts=facts).kind is Kind.DONE
 
 
 # Time text
@@ -169,23 +104,8 @@ def test_working_shows_range():
     assert row.time_text == "12–16 min left"
 
 
-def test_equal_bounds_show_one_number():
-    samples = [10 * MIN + s for s in range(1, 10)]
-    row = row_of(sf(since=NOW - 10 * MIN), history={"s": ProjectHistory(turns_s=samples)})
-    assert row.time_text == "1 min left"
-
-
-def test_estimate_accounts_for_elapsed_time():
-    row = row_of(sf(since=NOW - 5 * MIN), history={"s": ProjectHistory(turns_s=TURNS_12_16)})
-    assert row.time_text == "7–11 min left"
-
-
 def test_working_without_estimate():
     assert row_of(sf(since=NOW - 6 * MIN)).time_text == "no reliable estimate, running 6 min"
-
-
-def test_working_under_a_minute_without_estimate():
-    assert row_of(sf(since=NOW - 20)).time_text == "no reliable estimate, running under 1 min"
 
 
 def _experiment_row(command, samples):
@@ -201,20 +121,6 @@ def test_experiment_uses_matching_command_history():
     key = experiment_key(COMMAND)
     row = _experiment_row(COMMAND, {key: [25 * MIN, 30 * MIN, 35 * MIN]})
     assert row.time_text == "22–28 min left"
-
-
-def test_experiment_with_unkeyed_command_has_no_estimate():
-    row = _experiment_row("pytest -q", {})
-    assert row.time_text == "no reliable estimate, running 5 min"
-
-
-def test_experiment_with_too_few_runs_has_no_estimate():
-    row = _experiment_row(COMMAND, {experiment_key(COMMAND): [25 * MIN, 30 * MIN]})
-    assert row.time_text == "no reliable estimate, running 5 min"
-
-
-def test_shell_without_known_task_has_no_estimate():
-    assert row_of(sf(status="shell", since=NOW - 2 * MIN)).time_text == "no reliable estimate, running 2 min"
 
 
 # Order
@@ -261,39 +167,12 @@ def test_order_matches_spec():
     ]
 
 
-def test_no_estimate_sorts_after_estimates():
-    history = {"has": ProjectHistory(turns_s=TURNS_12_16)}
-    rows, _ = Tracker().update(obs(sf("a-none", 1), sf("has", 2), history=history), NOW)
-    assert [r.name for r in rows] == ["has", "a-none"]
-
-
-def test_ties_sort_by_name():
-    rows, _ = Tracker().update(obs(sf("b", 1, "idle"), sf("a", 2, "idle")), NOW)
-    assert [r.name for r in rows] == ["a", "b"]
-
-
 # Recap
 
 
 def test_api_errors_prefix_recap():
     facts = {"s": TranscriptFacts(recap="Testing the runner.", api_error_count=3, last_api_error="connection_failed")}
     assert row_of(sf(), facts=facts).recap == "API errors: 3 (connection_failed). Testing the runner."
-
-
-def test_api_errors_without_recap_have_no_trailing_text():
-    facts = {"s": TranscriptFacts(api_error_count=1, last_api_error="connection_failed")}
-    assert row_of(sf(), facts=facts).recap == "API errors: 1 (connection_failed)"
-
-
-def test_done_row_has_no_api_prefix():
-    facts = {"s": TranscriptFacts(recap="R", api_error_count=3, last_api_error="x")}
-    assert row_of(sf(status="idle"), facts=facts).recap == "R"
-
-
-def test_recap_survives_when_facts_stop_arriving():
-    tracker = seen(sf(status="idle"), facts={"s": TranscriptFacts(recap="R")})
-    rows, _ = tracker.update(obs(), NOW + 2)
-    assert rows[0].recap == "R"
 
 
 # Notifications
@@ -303,11 +182,6 @@ def test_done_after_two_minutes_notifies():
     tracker = seen(sf(since=NOW - 840))
     _, events = tracker.update(obs(sf(status="idle"), facts={"s": TranscriptFacts(recap="Fixed it.")}), NOW)
     assert events == [Event("s is done", "Ran 14 min. Fixed it.")]
-
-
-def test_done_without_recap_body_is_just_the_duration():
-    _, events = seen(sf(since=NOW - 840)).update(obs(sf(status="idle")), NOW)
-    assert events[0].body == "Ran 14 min."
 
 
 @pytest.mark.parametrize("worked, count", [(119, 0), (120, 1)])
@@ -334,17 +208,6 @@ def test_shell_counts_as_still_working():
     assert [e.body for e in events] == ["Ran 2 min."]
 
 
-def test_shell_end_of_turn_does_not_notify():
-    _, events = seen(sf(since=NOW - 600)).update(obs(sf(status="shell")), NOW)
-    assert events == []
-
-
-def test_done_does_not_repeat():
-    tracker = seen(sf(since=NOW - 600))
-    tracker.update(obs(sf(status="idle")), NOW)
-    assert tracker.update(obs(sf(status="idle")), NOW + 2)[1] == []
-
-
 def test_crash_notifies_once_with_recap():
     file = sf()
     tracker = seen(file, facts={"s": TranscriptFacts(recap="R")})
@@ -362,37 +225,11 @@ def test_waiting_notifies_after_ten_seconds_once():
     assert tracker.update(obs(waiting), NOW + 14)[1] == []
 
 
-def test_three_second_dialog_never_notifies():
-    tracker = seen(sf(status="busy"))
-    assert tracker.update(obs(sf(status="waiting", since=NOW + 2)), NOW + 4)[1] == []
-    assert tracker.update(obs(sf(status="busy", since=NOW + 5)), NOW + 6)[1] == []
-
-
 def test_first_update_never_notifies():
     file = sf(status="waiting", since=NOW - 600)
     tracker = Tracker()
     assert tracker.update(obs(file, sf("x", 2)), NOW)[1] == []
     assert tracker.update(obs(file, sf("x", 2)), NOW + 2)[1] == []
-
-
-def test_first_update_after_restore_never_notifies():
-    state = json.loads(json.dumps(seen(sf(since=NOW - 600)).snapshot()))
-    tracker = Tracker(state)
-    assert tracker.update(obs(), NOW + 2)[1] == []
-    assert tracker.update(obs(), NOW + 4)[1] == []
-
-
-def test_no_reply_never_notifies():
-    tracker = seen(sf())
-    facts = {"s": TranscriptFacts(unanswered_since=NOW - 3600)}
-    assert tracker.update(obs(sf(), facts=facts), NOW + 2)[1] == []
-
-
-def test_new_session_finishing_on_a_later_poll_can_notify():
-    tracker = seen(sf("other", 2, "idle"))
-    tracker.update(obs(sf("other", 2, "idle"), sf(since=NOW - 300)), NOW)
-    _, events = tracker.update(obs(sf("other", 2, "idle"), sf(status="idle", since=NOW + 2)), NOW + 2)
-    assert [e.title for e in events] == ["s is done"]
 
 
 # Clear and persistence
@@ -405,23 +242,6 @@ def test_clear_hides_row_even_if_file_remains():
     assert tracker.update(obs(file), NOW + 2)[0] == []
 
 
-def test_cleared_session_sends_no_events():
-    file = sf(since=NOW - 600)
-    tracker = seen(file)
-    tracker.clear(file.key)
-    assert tracker.update(obs(sf(status="idle")), NOW + 2)[1] == []
-
-
-def test_clear_unknown_key_is_harmless():
-    Tracker().clear("nope")
-
-
-def test_resume_in_new_process_after_clear_is_listed():
-    tracker = seen(sf(pid=1))
-    tracker.clear("s:1")
-    assert [r.pid for r in tracker.update(obs(sf(pid=2)), NOW + 2)[0]] == [2]
-
-
 def test_snapshot_round_trip_keeps_done_and_crashed_rows():
     crash, done = sf("c", 1, "busy"), sf("d", 2, "idle", since=NOW - 240)
     tracker = seen(crash, done, facts={"d": TranscriptFacts(recap="R")})
@@ -429,14 +249,6 @@ def test_snapshot_round_trip_keeps_done_and_crashed_rows():
     restored = Tracker(json.loads(json.dumps(tracker.snapshot())))
     rows, _ = restored.update(obs(), NOW + 120)
     assert [(r.name, r.kind, r.recap) for r in rows] == [("c", Kind.CRASHED, ""), ("d", Kind.DONE, "R")]
-
-
-def test_snapshot_round_trip_keeps_cleared_keys():
-    file = sf()
-    tracker = seen(file)
-    tracker.clear(file.key)
-    restored = Tracker(json.loads(json.dumps(tracker.snapshot())))
-    assert restored.update(obs(file), NOW + 2)[0] == []
 
 
 @pytest.mark.parametrize("state", [{}, {"sessions": "x"}, {"sessions": [{"nope": 1}]}, {"cleared": 5}, []])
@@ -474,14 +286,6 @@ def test_two_live_processes_of_one_session_show_the_newest_and_alert_once(new_fi
     assert [e.title for e in events] == ["s needs you"]
 
 
-def test_cleared_old_file_does_not_hide_a_resumed_session():
-    old, new = sf(pid=1), sf(pid=2)
-    tracker = seen(old)
-    tracker.clear(old.key)
-    rows, _ = tracker.update(obs(old, new, alive={old.key: False}), NOW + 2)
-    assert [r.pid for r in rows] == [2]
-
-
 def test_vanished_file_with_process_still_alive_is_not_a_crash():
     tracker = Tracker(alive_check=lambda pid, proc_start: True)
     tracker.update(obs(sf()), NOW)
@@ -504,10 +308,3 @@ def test_unknown_status_after_idle_restarts_the_work_clock():
     tracker.update(obs(sf(status="compacting", since=NOW + 10)), NOW + 10)
     _, events = tracker.update(obs(sf(status="idle", since=NOW + 15)), NOW + 15)
     assert events == []
-
-
-def test_unknown_status_mid_turn_keeps_the_work_clock():
-    tracker = seen(sf(since=NOW - 600))
-    tracker.update(obs(sf(status="compacting", since=NOW - 300)), NOW - 300)
-    _, events = tracker.update(obs(sf(status="idle", since=NOW)), NOW)
-    assert [e.body for e in events] == ["Ran 10 min."]

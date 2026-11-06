@@ -6,7 +6,7 @@ import time
 
 import webview
 
-from session_panel.app import panel_html
+from session_panel.app import alert_html, panel_html
 
 EVIL = "<img src=x onerror=window.hacked=1>"
 
@@ -99,23 +99,79 @@ def _wait_true(check, seconds=5):
     return False
 
 
+class FakeAlertApi:
+    def __init__(self):
+        self.opened = 0
+        self.dismissed = 0
+
+    def open(self):
+        self.opened += 1
+
+    def dismiss(self):
+        self.dismissed += 1
+
+
+def run_alert_checks(window, api, out):
+    def js(code):
+        return window.evaluate_js(code)
+
+    def show(title, body):
+        js(f"showAlert({json.dumps({'title': title, 'body': body})})")
+
+    wait_for(window, "!!(window.pywebview && window.pywebview.api && window.pywebview.api.open)")
+    show("alpha is done", "Ran 3 min.")
+    out["alert_title"] = js("document.getElementById('title').textContent")
+    out["alert_body"] = js("document.getElementById('body').textContent")
+    out["alert_more_hidden"] = js("document.getElementById('more').textContent")
+    show("beta crashed", "Recap")
+    show(EVIL, EVIL)
+    out["alert_evil_title"] = js("document.getElementById('title').textContent")
+    out["alert_evil_body"] = js("document.getElementById('body').textContent")
+    out["alert_evil_img"] = js("document.querySelectorAll('img').length")
+    out["alert_more"] = js("document.getElementById('more').textContent")
+    js("resetAlert()")
+    show("gamma is done", "x")
+    out["alert_more_after_reset"] = js("document.getElementById('more').textContent")
+    js("document.getElementById('close').click()")
+    out["alert_close_dismissed"] = _wait_true(lambda: api.dismissed == 1)
+    out["alert_close_did_not_open"] = api.opened == 0
+    js("document.getElementById('alert').click()")
+    out["alert_click_opened"] = _wait_true(lambda: api.opened == 1)
+
+
 def test_page_behaviour():
     api = FakeApi()
+    alert_api = FakeAlertApi()
     out = {}
     window = webview.create_window("test", html=panel_html(), js_api=api, width=350, height=300, hidden=True)
+    alert = webview.create_window("alert", html=alert_html(), js_api=alert_api, width=340, height=110, hidden=True)
 
     def driver():
         try:
             window.events.loaded.wait(20)
+            alert.events.loaded.wait(20)
             run_checks(window, api, out)
+            run_alert_checks(alert, alert_api, out)
         except Exception as error:
             out["error"] = repr(error)
         finally:
+            alert.destroy()
             window.destroy()
 
     webview.start(driver)
 
     assert "error" not in out, out
+    assert out["alert_title"] == "alpha is done"
+    assert out["alert_body"] == "Ran 3 min."
+    assert out["alert_more_hidden"] == ""
+    assert out["alert_evil_title"] == EVIL
+    assert out["alert_evil_body"] == EVIL
+    assert out["alert_evil_img"] == 0
+    assert out["alert_more"] == "and 2 more"
+    assert out["alert_more_after_reset"] == ""
+    assert out["alert_close_dismissed"] is True
+    assert out["alert_close_did_not_open"] is True
+    assert out["alert_click_opened"] is True
     assert out["api_ready"] is True
     assert out["empty_text"] == "No Claude Code sessions running"
     assert out["names"] == ["alpha", "beta"]

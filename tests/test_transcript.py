@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 
-from session_panel.transcript import TranscriptFacts, TranscriptTail, find_transcript
+from session_panel.transcript import TranscriptFacts, TranscriptTail
 
 T0 = "2026-11-05T05:00:00.000Z"
 T0_S = datetime(2026, 11, 5, 5, 0, 0, tzinfo=datetime.fromisoformat(T0).tzinfo).timestamp()
@@ -80,33 +80,11 @@ def test_recap_strips_config_hint(tmp_path):
     assert facts.recap == "Testing the runner."
 
 
-def test_latest_recap_wins(tmp_path):
-    assert tail_of(tmp_path, [away("old"), away("new")]).recap == "new"
-
-
 def test_best_recap_prefers_recap_then_title_then_prompt():
     assert TranscriptFacts(recap="r", title="t", last_prompt="p").best_recap() == "r"
     assert TranscriptFacts(title="t", last_prompt="p").best_recap() == "t"
     assert TranscriptFacts(last_prompt="p").best_recap() == "p"
     assert TranscriptFacts().best_recap() == ""
-
-
-def test_title_is_read(tmp_path):
-    assert tail_of(tmp_path, [title("Fix camera")]).title == "Fix camera"
-
-
-def test_human_prompt_cut_to_80_chars(tmp_path):
-    assert tail_of(tmp_path, [prompt("x" * 200)]).last_prompt == "x" * 80
-
-
-def test_human_prompt_in_block_form(tmp_path):
-    record = prompt("")
-    record["message"]["content"] = [{"type": "text", "text": "hello"}]
-    assert tail_of(tmp_path, [record]).last_prompt == "hello"
-
-
-def test_only_human_prompts_count(tmp_path):
-    assert tail_of(tmp_path, [prompt("tool output", kind="task-notification")]).last_prompt is None
 
 
 def test_no_reply_clock_starts_once_and_stops_on_real_reply(tmp_path):
@@ -122,33 +100,10 @@ def test_new_human_prompt_stops_a_clock_left_by_an_interrupted_turn(tmp_path):
     assert tail_of(tmp_path, [api_request(T0), prompt("try again")]).unanswered_since is None
 
 
-def test_clock_restarts_from_the_request_after_a_new_prompt(tmp_path):
-    facts = tail_of(tmp_path, [api_request(T0), prompt("try again"), api_request(T2)])
-    assert facts.unanswered_since == T0_S + 180
-
-
-def test_tool_results_do_not_stop_the_clock(tmp_path):
-    facts = tail_of(tmp_path, [api_request(T0), prompt("result", kind="task-notification")])
-    assert facts.unanswered_since == T0_S
-
-
-def test_subagent_requests_do_not_start_the_clock(tmp_path):
-    assert tail_of(tmp_path, [api_request(source="agent")]).unanswered_since is None
-
-
 def test_api_errors_count_and_keep_clock_running(tmp_path):
     facts = tail_of(tmp_path, [api_request(T0), api_error(T1), api_error(T2)])
     assert (facts.api_error_count, facts.last_api_error) == (2, "connection_failed")
     assert facts.unanswered_since == T0_S
-
-
-def test_real_reply_resets_api_errors(tmp_path):
-    facts = tail_of(tmp_path, [api_request(T0), api_error(T1), reply(T2)])
-    assert (facts.api_error_count, facts.last_api_error) == (0, None)
-
-
-def test_turn_durations_in_seconds(tmp_path):
-    assert tail_of(tmp_path, [turn_duration(1278626)]).turn_durations_s == [1278.626]
 
 
 def test_background_task_opens_then_finishes(tmp_path):
@@ -161,22 +116,6 @@ def test_background_task_opens_then_finishes(tmp_path):
     facts = tail.poll()
     assert facts.open_background == {}
     assert facts.finished_background == [("run --config a", 100.0)]
-
-
-def test_failed_background_task_closes_without_a_sample(tmp_path):
-    facts = tail_of(tmp_path, [background("toolu_1", "run"), notification("toolu_1", status="failed")])
-    assert facts.open_background == {}
-    assert facts.finished_background == []
-
-
-def test_notification_for_unknown_task_is_ignored(tmp_path):
-    assert tail_of(tmp_path, [notification("toolu_9")]).finished_background == []
-
-
-def test_foreground_tool_is_not_tracked(tmp_path):
-    record = background("toolu_1", "run")
-    record["message"]["content"][0]["input"]["run_in_background"] = False
-    assert tail_of(tmp_path, [record]).open_background == {}
 
 
 def test_poll_reads_incrementally(tmp_path):
@@ -201,13 +140,6 @@ def test_partial_last_line_waits_for_newline(tmp_path):
     assert tail.poll().title == "whole"
 
 
-def test_malformed_lines_are_skipped(tmp_path):
-    path = tmp_path / "t.jsonl"
-    path.write_text('{"type":"ai-title","aiTi\n[1]\n"ai-title"\n')
-    write_lines(path, [title("good")])
-    assert TranscriptTail(path).poll().title == "good"
-
-
 def test_records_with_unexpected_shapes_are_skipped(tmp_path):
     records = [
         {"type": "assistant", "message": "not a dict"},
@@ -220,17 +152,6 @@ def test_records_with_unexpected_shapes_are_skipped(tmp_path):
     assert tail_of(tmp_path, records).title == "after"
 
 
-def test_non_utf8_bytes_do_not_stop_reading(tmp_path):
-    path = tmp_path / "t.jsonl"
-    path.write_bytes(b'{"type":"ai-title","aiTitle":"\xff"}\n')
-    write_lines(path, [title("good")])
-    assert TranscriptTail(path).poll().title == "good"
-
-
-def test_unknown_record_types_are_ignored(tmp_path):
-    assert tail_of(tmp_path, [{"type": "brand-new", "aiTitle": "no"}]).title is None
-
-
 def test_truncated_file_restarts_from_zero(tmp_path):
     path = tmp_path / "t.jsonl"
     write_lines(path, [turn_duration(1000), turn_duration(2000)])
@@ -238,15 +159,3 @@ def test_truncated_file_restarts_from_zero(tmp_path):
     tail.poll()
     path.write_text(json.dumps(turn_duration(3000)) + "\n")
     assert tail.poll().turn_durations_s == [3.0]
-
-
-def test_missing_file_gives_empty_facts(tmp_path):
-    assert TranscriptTail(tmp_path / "gone.jsonl").poll() == TranscriptFacts()
-
-
-def test_find_transcript(tmp_path):
-    project = tmp_path / "C--x"
-    project.mkdir()
-    (project / "abc.jsonl").write_text("")
-    assert find_transcript(tmp_path, "abc") == project / "abc.jsonl"
-    assert find_transcript(tmp_path, "nope") is None

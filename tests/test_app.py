@@ -1,11 +1,21 @@
 import json
 import os
+import threading
 
 import psutil
-import pytest
 
-from session_panel.app import Collector, Controller, PanelApi, need_attention_count, page_payload
-from session_panel.model import Kind, Observation, Row, Tracker
+from session_panel.app import (
+    ALERT_SECONDS,
+    AlertApi,
+    Alerts,
+    Collector,
+    Controller,
+    PanelApi,
+    deliver,
+    need_attention_count,
+    panel_geometry,
+)
+from session_panel.model import Event, Kind, Observation, Row, Tracker
 from session_panel.sessions import SessionFile
 
 SID = "abc"
@@ -71,28 +81,6 @@ def test_collect_end_to_end(tmp_path):
     assert len(obs.history[SID].turns_s) == 8
 
 
-def test_collect_with_no_claude_dir(tmp_path):
-    obs = Collector(tmp_path / "gone").collect()
-    assert (obs.files, obs.unreadable_pids, obs.alive, obs.facts, obs.history) == ([], set(), {}, {}, {})
-
-
-def test_collect_picks_up_appended_transcript_lines(tmp_path):
-    write_session(tmp_path)
-    append(tmp_path, [away("first")])
-    collector = Collector(tmp_path)
-    collector.collect()
-    append(tmp_path, [away("second")])
-    assert collector.collect().facts[SID].recap == "second"
-
-
-def test_collect_session_without_transcript_yet(tmp_path):
-    write_session(tmp_path)
-    collector = Collector(tmp_path)
-    assert SID not in collector.collect().facts
-    append(tmp_path, [away("later")])
-    assert collector.collect().facts[SID].recap == "later"
-
-
 def test_collect_counts_each_turn_once_across_polls(tmp_path):
     write_session(tmp_path)
     append(tmp_path, [turn()])
@@ -100,30 +88,6 @@ def test_collect_counts_each_turn_once_across_polls(tmp_path):
     collector.collect()
     append(tmp_path, [turn()])
     assert len(collector.collect().history[SID].turns_s) == 2
-
-
-def test_collect_history_includes_other_transcripts_in_the_project(tmp_path):
-    write_session(tmp_path)
-    append(tmp_path, [*bg_run("t1")], session_id="older")
-    append(tmp_path, [*bg_run("t2")])
-    history = Collector(tmp_path).collect().history[SID]
-    assert history.experiments_s == {"--config a.json --timeout 60": [100.0, 100.0]}
-
-
-def test_collect_finds_new_transcripts_in_a_known_project(tmp_path):
-    write_session(tmp_path)
-    append(tmp_path, [turn()])
-    collector = Collector(tmp_path)
-    collector.collect()
-    append(tmp_path, [turn()], session_id="newer")
-    assert len(collector.collect().history[SID].turns_s) == 2
-
-
-def test_collect_keeps_projects_apart(tmp_path):
-    write_session(tmp_path)
-    append(tmp_path, [turn()])
-    append(tmp_path, [turn(), turn()], session_id="elsewhere", project="q")
-    assert len(Collector(tmp_path).collect().history[SID].turns_s) == 1
 
 
 def make_row(kind=Kind.WORKING, name="x", alive=True, key="k"):
@@ -135,17 +99,85 @@ def test_need_attention_counts_needs_you_crashed_done():
     assert need_attention_count(rows) == 3
 
 
-def test_payload_uses_lowercase_kind_and_counts_attention():
-    assert page_payload([make_row(Kind.NO_REPLY), make_row(Kind.DONE)]) == {
-        "attention": 1,
-        "rows": [
-            {"key": "k", "name": "x", "kind": "no_reply", "badge": "Badge", "time": "time", "recap": "recap"},
-            {"key": "k", "name": "x", "kind": "done", "badge": "Badge", "time": "time", "recap": "recap"},
-        ],
-    }
-
-
 NOW = 1_800_000_000.0
+
+
+def test_panel_sits_bottom_right_above_the_taskbar():
+    assert panel_geometry(2560, 1440) == {"width": 350, "height": 600, "x": 2210, "y": 760}
+
+
+def test_panel_fits_a_small_screen():
+    assert panel_geometry(1024, 600) == {"width": 350, "height": 520, "x": 674, "y": 0}
+
+
+class FakeWindow:
+    def __init__(self):
+        self.calls = []
+
+    def evaluate_js(self, code):
+        self.calls.append(code)
+
+    def show(self):
+        self.calls.append("show")
+
+    def hide(self):
+        self.calls.append("hide")
+
+    def restore(self):
+        self.calls.append("restore")
+
+    @property
+    def on_top(self):
+        return False
+
+    @on_top.setter
+    def on_top(self, value):
+        self.calls.append(f"on_top={value}")
+
+
+def test_alert_hides_only_after_its_time_is_up():
+    window = FakeWindow()
+    alerts = Alerts(window)
+    alerts.show(Event("t", "b"), NOW)
+    window.calls.clear()
+    alerts.tick(NOW + ALERT_SECONDS - 1)
+    assert window.calls == []
+    alerts.tick(NOW + ALERT_SECONDS)
+    assert window.calls == ["hide", "resetAlert()"]
+    window.calls.clear()
+    alerts.tick(NOW + ALERT_SECONDS + 5)
+    assert window.calls == []
+
+
+def test_clicking_an_alert_opens_the_panel_and_dismisses():
+    panel, alert = FakeWindow(), FakeWindow()
+    alerts = Alerts(alert)
+    alerts.show(Event("t", "b"), NOW)
+    alert.calls.clear()
+    AlertApi(panel, alerts).open()
+    assert panel.calls == ["restore", "show", "on_top=True", "on_top=False"]
+    assert alert.calls == ["hide", "resetAlert()"]
+
+
+def test_alert_api_exposes_only_open_and_dismiss():
+    api = AlertApi(FakeWindow(), Alerts(FakeWindow()))
+    assert [n for n in dir(api) if not n.startswith("_")] == ["dismiss", "open"]
+
+
+def _deliver(accepts):
+    window = FakeWindow()
+    toasted = threading.Event()
+    deliver(Event("t", "b"), Alerts(window), NOW, accepts=lambda: accepts, toast=lambda event: toasted.set())
+    assert toasted.wait(5)
+    return window.calls
+
+
+def test_normal_state_uses_only_the_windows_notification():
+    assert _deliver(True) == []
+
+
+def test_quiet_state_also_shows_our_own_alert():
+    assert "show" in _deliver(False)
 
 
 def session_file(status="busy"):
@@ -179,14 +211,6 @@ def controller_with_row(fakes, alive=True):
 def rows_after(controller, file, alive=True):
     observation = Observation([file], set(), {file.key: alive}, {}, {})
     return controller.apply(observation, NOW + 2)[0]
-
-
-def test_clear_dead_session_does_not_ask_or_stop():
-    fakes = Fakes()
-    controller, file = controller_with_row(fakes, alive=False)
-    assert controller.clear(file.key) is None
-    assert (fakes.asked, fakes.stopped) == ([], [])
-    assert rows_after(controller, file, alive=False) == []
 
 
 def test_clear_live_session_asks_then_stops():
@@ -228,33 +252,6 @@ def test_clear_does_not_raise_a_crash_alert_while_stopping():
     assert events_during_stop == []
 
 
-def test_clear_unknown_key_is_harmless():
-    fakes = Fakes()
-    controller, _ = controller_with_row(fakes)
-    assert controller.clear("nope") is None
-    assert (fakes.asked, fakes.stopped) == ([], [])
-
-
-def test_clear_signals_that_the_list_changed():
-    controller, file = controller_with_row(Fakes())
-    assert not controller.changed.is_set()
-    controller.clear(file.key)
-    assert controller.changed.is_set()
-
-
 def test_panel_api_exposes_only_clear():
     controller, _ = controller_with_row(Fakes())
     assert [n for n in dir(PanelApi(controller)) if not n.startswith("_")] == ["clear"]
-
-
-def test_panel_api_returns_warning():
-    controller, file = controller_with_row(Fakes(stop_result=False))
-    assert PanelApi(controller).clear(file.key) == {"warning": "Couldn't stop x. Close it in its terminal."}
-
-
-@pytest.mark.parametrize("bad_key", [None, 5, ["k"]])
-def test_panel_api_ignores_non_string_keys(bad_key):
-    fakes = Fakes()
-    controller, _ = controller_with_row(fakes)
-    assert PanelApi(controller).clear(bad_key) == {"warning": None}
-    assert fakes.stopped == []

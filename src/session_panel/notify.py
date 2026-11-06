@@ -1,5 +1,6 @@
 """Send Windows notifications."""
 
+import ctypes
 import logging
 import re
 
@@ -12,7 +13,27 @@ PLACEHOLDER = "No recap yet"
 # contain anything, so everything meaningful to either language has to go.
 _UNSAFE = re.compile(r"""["'`$<>&;(){}|]""")
 
+QUNS_ACCEPTS_NOTIFICATIONS = 5
+
 log = logging.getLogger(__name__)
+
+
+def _notification_state() -> int:
+    state = ctypes.c_int()
+    result = ctypes.windll.shell32.SHQueryUserNotificationState(ctypes.byref(state))
+    if result != 0:
+        raise OSError(f"SHQueryUserNotificationState returned {result}")
+    return state.value
+
+
+def windows_accepts_toasts() -> bool:
+    """False while Windows would hold a notification back, such as during fullscreen.
+    If the state can't be read, assume quiet: a redundant alert beats a missed one."""
+    try:
+        return _notification_state() == QUNS_ACCEPTS_NOTIFICATIONS
+    except Exception:
+        log.exception("Could not read the notification state")
+        return False
 
 
 def clean_toast_text(text: str, limit: int = 180) -> str:

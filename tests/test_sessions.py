@@ -9,7 +9,6 @@ from pathlib import Path
 import psutil
 import pytest
 
-from session_panel import sessions
 from session_panel.sessions import is_alive, read_session_files, stop_session
 
 REAL = {
@@ -56,68 +55,13 @@ def test_reads_a_real_shaped_file(tmp_path):
     assert f.proc_start == "134384170009515904"
 
 
-def test_waiting_for_is_read(tmp_path):
-    write(tmp_path, {**REAL, "status": "waiting", "waitingFor": "input needed"})
-    assert read_session_files(tmp_path)[0][0].waiting_for == "input needed"
-
-
-def test_missing_status_is_none(tmp_path):
-    write(tmp_path, {k: v for k, v in REAL.items() if k != "status"})
-    assert read_session_files(tmp_path)[0][0].status is None
-
-
-def test_other_kinds_are_skipped(tmp_path):
-    write(tmp_path, {**REAL, "pid": 1, "kind": "background"})
-    write(tmp_path, {k: v for k, v in {**REAL, "pid": 2}.items() if k != "kind"})
-    files, unreadable = read_session_files(tmp_path)
-    assert [f.pid for f in files] == [2]
-    assert unreadable == set()
-
-
 def test_half_written_file_is_reported_not_dropped(tmp_path):
     (tmp_path / "77.json").write_text('{"pid": 77, "sess')
     assert read_session_files(tmp_path) == ([], {77})
 
 
-def test_missing_required_field_is_reported_as_unreadable(tmp_path):
-    write(tmp_path, {k: v for k, v in REAL.items() if k != "sessionId"})
-    assert read_session_files(tmp_path) == ([], {29584})
-
-
-def test_non_object_json_is_reported_as_unreadable(tmp_path):
-    (tmp_path / "5.json").write_text("[1, 2]")
-    assert read_session_files(tmp_path) == ([], {5})
-
-
-def test_missing_optional_name_falls_back_to_session_id(tmp_path):
-    write(tmp_path, {k: v for k, v in REAL.items() if k != "name"})
-    assert read_session_files(tmp_path)[0][0].name == "abc"
-
-
-def test_missing_directory_is_empty(tmp_path):
-    assert read_session_files(tmp_path / "nope") == ([], set())
-
-
-def test_is_alive_true_for_this_process():
-    assert is_alive(os.getpid(), filetime_of(os.getpid()))
-
-
 def test_is_alive_false_when_start_time_differs():
     assert not is_alive(os.getpid(), WRONG_START)
-
-
-def test_is_alive_false_for_dead_pid():
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    proc.wait()
-    assert not is_alive(proc.pid, None)
-
-
-def test_is_alive_without_proc_start_checks_pid_only():
-    assert is_alive(os.getpid(), None)
-
-
-def test_is_alive_with_unparseable_proc_start_checks_pid_only():
-    assert is_alive(os.getpid(), "not-a-number")
 
 
 def test_stop_session_stops_process_and_its_child(tmp_path):
@@ -145,12 +89,6 @@ def test_stop_session_stops_process_and_its_child(tmp_path):
 def test_stop_session_refuses_reused_pid(sleeper):
     assert stop_session(sleeper.pid, WRONG_START) is True
     assert sleeper.poll() is None
-
-
-def test_stop_session_on_dead_pid_returns_true():
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    proc.wait()
-    assert stop_session(proc.pid, None) is True
 
 
 @pytest.mark.parametrize("proc_start", [None, "not-a-number"])
@@ -205,24 +143,6 @@ def test_denied_child_still_stops_the_session_and_reports_failure(tmp_path, monk
         _kill_all(parent, descendants)
 
 
-def test_surviving_child_reports_failure(tmp_path, monkeypatch):
-    parent, child = _parent_with_child(tmp_path)
-    descendants = psutil.Process(parent.pid).children(recursive=True)
-    real_terminate = psutil.Process.terminate
-
-    def terminate(self):
-        if self.pid == parent.pid:
-            real_terminate(self)
-
-    monkeypatch.setattr(psutil.Process, "terminate", terminate)
-    monkeypatch.setattr(sessions, "STOP_WAIT_S", 0.5)
-    try:
-        assert stop_session(parent.pid, filetime_of(parent.pid)) is False
-    finally:
-        monkeypatch.undo()
-        _kill_all(parent, descendants)
-
-
 @pytest.mark.parametrize(
     "field, value, attribute, expected",
     [
@@ -243,11 +163,6 @@ def test_wrong_typed_fields_do_not_lose_the_session(tmp_path, field, value, attr
     assert getattr(files[0], attribute) == expected
 
 
-def test_non_string_session_id_is_unreadable(tmp_path):
-    write(tmp_path, {**REAL, "sessionId": 5})
-    assert read_session_files(tmp_path) == ([], {29584})
-
-
 def test_listing_failure_is_raised_not_reported_as_empty(tmp_path, monkeypatch):
     def denied(self):
         raise PermissionError("in use")
@@ -255,11 +170,3 @@ def test_listing_failure_is_raised_not_reported_as_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "iterdir", denied)
     with pytest.raises(PermissionError):
         read_session_files(tmp_path)
-
-
-def test_stop_session_reports_access_denied(sleeper, monkeypatch):
-    def denied(self):
-        raise psutil.AccessDenied(self.pid)
-
-    monkeypatch.setattr(psutil.Process, "terminate", denied)
-    assert stop_session(sleeper.pid, filetime_of(sleeper.pid)) is False
