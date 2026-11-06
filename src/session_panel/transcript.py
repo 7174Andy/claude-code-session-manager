@@ -55,6 +55,7 @@ def _apply_system(facts: TranscriptFacts, record: dict) -> None:
 def _apply_user(facts: TranscriptFacts, record: dict) -> None:
     if record.get("origin", {}).get("kind") != "human":
         return
+    facts.unanswered_since = None  # an interrupted turn must not count against the next one
     content = record["message"]["content"]
     if not isinstance(content, str):
         content = " ".join(b["text"] for b in content if b.get("type") == "text")

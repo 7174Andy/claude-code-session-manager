@@ -172,6 +172,7 @@ def controller_with_row(fakes, alive=True):
     controller = Controller(Tracker(), fakes.confirm, fakes.stop)
     file = session_file()
     controller.apply(Observation([file], set(), {file.key: alive}, {}, {}), NOW)
+    controller.apply(Observation([file], set(), {file.key: alive}, {}, {}), NOW + 1)
     return controller, file
 
 
@@ -210,6 +211,21 @@ def test_clear_failed_stop_warns_and_still_removes_row():
     controller, file = controller_with_row(fakes)
     assert controller.clear(file.key) == "Couldn't stop x. Close it in its terminal."
     assert rows_after(controller, file) == []
+
+
+def test_clear_does_not_raise_a_crash_alert_while_stopping():
+    fakes = Fakes()
+    controller, file = controller_with_row(fakes)
+    events_during_stop = []
+
+    def stop_with_a_poll_in_the_middle(pid, proc_start):
+        dead = Observation([file], set(), {file.key: False}, {}, {})
+        events_during_stop.extend(controller.apply(dead, NOW + 2)[1])
+        return True
+
+    controller._stop = stop_with_a_poll_in_the_middle
+    controller.clear(file.key)
+    assert events_during_stop == []
 
 
 def test_clear_unknown_key_is_harmless():

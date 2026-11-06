@@ -4,10 +4,12 @@ import subprocess
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import psutil
 import pytest
 
+from session_panel import sessions
 from session_panel.sessions import is_alive, read_session_files, stop_session
 
 REAL = {
@@ -149,6 +151,110 @@ def test_stop_session_on_dead_pid_returns_true():
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
     proc.wait()
     assert stop_session(proc.pid, None) is True
+
+
+@pytest.mark.parametrize("proc_start", [None, "not-a-number"])
+def test_stop_session_refuses_when_identity_cannot_be_proven(sleeper, proc_start):
+    assert stop_session(sleeper.pid, proc_start) is False
+    assert sleeper.poll() is None
+
+
+def _parent_with_child(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    code = textwrap.dedent(f"""
+        import subprocess, sys, time, pathlib
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        pathlib.Path(r"{pid_file}").write_text(str(child.pid))
+        time.sleep(60)
+    """)
+    parent = subprocess.Popen([sys.executable, "-c", code])
+    deadline = time.time() + 15
+    while not (pid_file.exists() and pid_file.read_text()) and time.time() < deadline:
+        time.sleep(0.05)
+    return parent, psutil.Process(int(pid_file.read_text()))
+
+
+def _kill_all(parent, descendants):
+    parent.kill()
+    for process in descendants:
+        try:
+            process.kill()
+        except psutil.NoSuchProcess:
+            pass
+
+
+def test_denied_child_still_stops_the_session_and_reports_failure(tmp_path, monkeypatch):
+    parent, child = _parent_with_child(tmp_path)
+    descendants = psutil.Process(parent.pid).children(recursive=True)
+    real_terminate = psutil.Process.terminate
+
+    terminated = []
+
+    def terminate(self):
+        terminated.append(self.pid)
+        if self.pid != parent.pid:
+            raise psutil.AccessDenied(self.pid)
+        real_terminate(self)
+
+    monkeypatch.setattr(psutil.Process, "terminate", terminate)
+    try:
+        assert stop_session(parent.pid, filetime_of(parent.pid)) is False
+        assert parent.pid in terminated
+    finally:
+        monkeypatch.undo()
+        _kill_all(parent, descendants)
+
+
+def test_surviving_child_reports_failure(tmp_path, monkeypatch):
+    parent, child = _parent_with_child(tmp_path)
+    descendants = psutil.Process(parent.pid).children(recursive=True)
+    real_terminate = psutil.Process.terminate
+
+    def terminate(self):
+        if self.pid == parent.pid:
+            real_terminate(self)
+
+    monkeypatch.setattr(psutil.Process, "terminate", terminate)
+    monkeypatch.setattr(sessions, "STOP_WAIT_S", 0.5)
+    try:
+        assert stop_session(parent.pid, filetime_of(parent.pid)) is False
+    finally:
+        monkeypatch.undo()
+        _kill_all(parent, descendants)
+
+
+@pytest.mark.parametrize(
+    "field, value, attribute, expected",
+    [
+        ("status", {"state": "busy"}, "status", "{'state': 'busy'}"),
+        ("status", 5, "status", "5"),
+        ("name", 7, "name", "abc"),
+        ("waitingFor", ["x"], "waiting_for", None),
+        ("procStart", 134384170009515904, "proc_start", "134384170009515904"),
+        ("procStart", {"a": 1}, "proc_start", None),
+        ("statusUpdatedAt", "2026-11-05T05:00:00Z", "status_updated_at", None),
+        ("startedAt", "soon", "started_at", 0.0),
+    ],
+)
+def test_wrong_typed_fields_do_not_lose_the_session(tmp_path, field, value, attribute, expected):
+    write(tmp_path, {**REAL, field: value})
+    files, unreadable = read_session_files(tmp_path)
+    assert unreadable == set()
+    assert getattr(files[0], attribute) == expected
+
+
+def test_non_string_session_id_is_unreadable(tmp_path):
+    write(tmp_path, {**REAL, "sessionId": 5})
+    assert read_session_files(tmp_path) == ([], {29584})
+
+
+def test_listing_failure_is_raised_not_reported_as_empty(tmp_path, monkeypatch):
+    def denied(self):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(Path, "iterdir", denied)
+    with pytest.raises(PermissionError):
+        read_session_files(tmp_path)
 
 
 def test_stop_session_reports_access_denied(sleeper, monkeypatch):

@@ -8,7 +8,7 @@ The user runs many Claude Code sessions at once, one terminal per task, and drif
 
 A slim, always-on-top Windows desktop window (Layout A) that lists every Claude Code session on the computer. At a glance it shows each session's state and how long the wait is, so the user can pick a video that fits. It sends a Windows notification when a session needs them.
 
-It is a separate window, not a Chrome panel, so it stays visible over Chrome and terminals. Fullscreen YouTube may cover it; notifications should still arrive unless Do Not Disturb hides them.
+It is a separate window, not a Chrome panel, so it stays visible over Chrome and terminals. Fullscreen YouTube may cover it, and notifications may not pop up then (see Known limits).
 
 ## Layout A
 
@@ -41,7 +41,7 @@ All under `~/.claude`.
 - **`projects/<slug>/<sessionId>.jsonl`:**
   - `system`/`away_summary` `.content`: recap, with the trailing ` (disable recaps in /config)` removed
   - `ai-title` `.aiTitle`: fallback recap
-  - `user` with `origin.kind` `human`: second fallback, first 80 characters of the prompt
+  - `user` with `origin.kind` `human`: second fallback, first 80 characters of the prompt; also stops the no-reply clock, so an interrupted turn doesn't count against the next one
   - `api-request` with `querySource` `repl_main_thread`: starts the no-reply clock if it isn't running
   - `assistant` with `message.model` other than `<synthetic>`: stops the no-reply clock and resets the API error count
   - `assistant` with `isApiErrorMessage` true: API error count and `apiError` reason
@@ -81,7 +81,7 @@ No reply does not notify. Past gaps of 3–5 minutes nearly always ended in a no
 
 - Removes the session from the list and keeps its transcript, so `claude --resume` still works.
 - Leaves Claude's session files alone.
-- If the process is alive, it first asks for confirmation, then stops the process and anything it started. Identity is re-checked first, so a reused PID is never killed.
+- If the process is alive, it first asks for confirmation, then stops the process and anything it started. Identity is re-checked first, so a reused PID is never killed. If identity can't be proven, or anything survives the stop, the row is still removed and the panel warns the user to close the session in its terminal.
 - Clearing is per process: resuming a cleared session in a new process lists it again.
 
 ## Persistence

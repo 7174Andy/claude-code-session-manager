@@ -116,17 +116,16 @@ class Controller:
             row = self._rows.get(key)
         if row is None:
             return None
-        warning = None
-        if row.alive:
-            if not self._confirm(f"Stop {row.name} and anything it started? Its transcript is kept."):
-                return None
-            if not self._stop(row.pid, row.proc_start):
-                warning = f"Couldn't stop {row.name}. Close it in its terminal."
+        if row.alive and not self._confirm(f"Stop {row.name} and anything it started? Its transcript is kept."):
+            return None
+        # Forget the row before stopping it, so a poll during the stop can't report a crash.
         with self._lock:
             self._tracker.clear(key)
             self._rows.pop(key, None)
         self.changed.set()
-        return warning
+        if row.alive and not self._stop(row.pid, row.proc_start):
+            return f"Couldn't stop {row.name}. Close it in its terminal."
+        return None
 
 
 class PanelApi:
@@ -176,7 +175,7 @@ def main() -> None:
     def confirm(message: str) -> bool:
         return window.create_confirmation_dialog("Clear session", message)
 
-    controller = Controller(Tracker(load_state(state_path)), confirm, stop_session)
+    controller = Controller(Tracker(load_state(state_path), is_alive), confirm, stop_session)
     screen = webview.screens[0]
     window = webview.create_window(
         "Sessions",

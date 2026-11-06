@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -441,3 +442,72 @@ def test_snapshot_round_trip_keeps_cleared_keys():
 @pytest.mark.parametrize("state", [{}, {"sessions": "x"}, {"sessions": [{"nope": 1}]}, {"cleared": 5}, []])
 def test_malformed_state_starts_empty(state):
     assert Tracker(state).update(obs(), NOW) == ([], [])
+
+
+# Found in final review
+
+
+@pytest.mark.parametrize("new_first", [True, False])
+def test_resume_with_old_dead_file_still_present_does_not_repeat_alerts(new_first):
+    old, new = sf(pid=1), sf(pid=2)
+    files = [new, old] if new_first else [old, new]
+    tracker = seen(old)
+    events = []
+    for i in range(1, 5):
+        rows, more = tracker.update(obs(*files, alive={old.key: False}), NOW + i * 2)
+        events += more
+        assert [r.pid for r in rows] == [2]
+    assert events == []
+
+
+@pytest.mark.parametrize("new_first", [True, False])
+def test_two_live_processes_of_one_session_show_the_newest_and_alert_once(new_first):
+    old = replace(sf(pid=1, status="waiting"), started_at=NOW - 500)
+    new = replace(sf(pid=2, status="waiting"), started_at=NOW - 100)
+    files = [new, old] if new_first else [old, new]
+    tracker = seen(sf("other", 9))
+    events = []
+    for i in range(0, 12):
+        rows, more = tracker.update(obs(sf("other", 9), *files), NOW + i * 2)
+        events += more
+    assert [r.pid for r in rows if r.name == "s"] == [2]
+    assert [e.title for e in events] == ["s needs you"]
+
+
+def test_cleared_old_file_does_not_hide_a_resumed_session():
+    old, new = sf(pid=1), sf(pid=2)
+    tracker = seen(old)
+    tracker.clear(old.key)
+    rows, _ = tracker.update(obs(old, new, alive={old.key: False}), NOW + 2)
+    assert [r.pid for r in rows] == [2]
+
+
+def test_vanished_file_with_process_still_alive_is_not_a_crash():
+    tracker = Tracker(alive_check=lambda pid, proc_start: True)
+    tracker.update(obs(sf()), NOW)
+    rows, events = tracker.update(obs(), NOW + 2)
+    assert rows[0].kind is Kind.WORKING
+    assert events == []
+
+
+def test_vanished_file_with_process_dead_is_a_crash():
+    tracker = Tracker(alive_check=lambda pid, proc_start: False)
+    tracker.update(obs(sf()), NOW)
+    rows, events = tracker.update(obs(), NOW + 2)
+    assert rows[0].kind is Kind.CRASHED
+    assert [e.title for e in events] == ["s crashed"]
+
+
+def test_unknown_status_after_idle_restarts_the_work_clock():
+    tracker = seen(sf(since=NOW - 3600))
+    tracker.update(obs(sf(status="idle", since=NOW)), NOW)
+    tracker.update(obs(sf(status="compacting", since=NOW + 10)), NOW + 10)
+    _, events = tracker.update(obs(sf(status="idle", since=NOW + 15)), NOW + 15)
+    assert events == []
+
+
+def test_unknown_status_mid_turn_keeps_the_work_clock():
+    tracker = seen(sf(since=NOW - 600))
+    tracker.update(obs(sf(status="compacting", since=NOW - 300)), NOW - 300)
+    _, events = tracker.update(obs(sf(status="idle", since=NOW)), NOW)
+    assert [e.body for e in events] == ["Ran 10 min."]

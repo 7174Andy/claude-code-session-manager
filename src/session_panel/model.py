@@ -1,7 +1,8 @@
 """Turn observations of Claude's files into sorted rows and notification events."""
 
 import math
-from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from enum import Enum
 
 from session_panel.estimate import (
@@ -112,10 +113,15 @@ def _left(estimate: tuple[int, int]) -> str:
 
 
 class Tracker:
-    def __init__(self, state: dict | None = None) -> None:
+    def __init__(
+        self,
+        state: dict | None = None,
+        alive_check: Callable[[int, str | None], bool] = lambda pid, proc_start: False,
+    ) -> None:
         self._sessions: dict[str, _Tracked] = {}
         self._cleared: set[str] = set()
         self._first = True
+        self._alive_check = alive_check
         if state:
             self._restore(state)
 
@@ -139,14 +145,13 @@ class Tracker:
         events: list[Event] = []
         first, self._first = self._first, False
 
-        for file in obs.files:
-            if file.key not in self._cleared:
-                self._observe_file(file, obs, now, events)
+        for file in self._current_files(obs):
+            self._observe_file(file, obs, now, events)
 
         file_keys = {f.key for f in obs.files}
         for tracked in list(self._sessions.values()):
             vanished = tracked.key not in file_keys and tracked.pid not in obs.unreadable_pids
-            if vanished:
+            if vanished and (tracked.gone or not self._alive_check(tracked.pid, tracked.proc_start)):
                 self._end(tracked, now, events)
             if tracked.key in self._sessions and tracked.status == "waiting" and not tracked.gone:
                 self._notify_waiting(tracked, obs, now, first, events)
@@ -156,6 +161,23 @@ class Tracker:
             key=lambda item: (_RANK[item[0].kind], item[1], item[0].name),
         )
         return [row for row, _ in rows], [] if first else events
+
+    def _current_files(self, obs: Observation) -> list[SessionFile]:
+        """Pick one file per session, so a resume with the old file still on disk shows one
+        row. Older files are dropped here, or they would look new again on every poll."""
+        best: dict[str, SessionFile] = {}
+        for file in obs.files:
+            if file.key in self._cleared:
+                continue
+            current = best.get(file.session_id)
+            rank = (obs.alive.get(file.key, True), file.started_at, file.pid)
+            if current is None or rank > (obs.alive.get(current.key, True), current.started_at, current.pid):
+                best[file.session_id] = file
+        winners = {file.key for file in best.values()}
+        for file in obs.files:
+            if file.key not in winners:
+                self._sessions.pop(file.key, None)
+        return list(best.values())
 
     def _observe_file(self, file: SessionFile, obs: Observation, now: float, events: list[Event]) -> None:
         alive = obs.alive.get(file.key, True)
@@ -182,7 +204,7 @@ class Tracker:
     def _transition(self, tracked: _Tracked, file: SessionFile, now: float, events: list[Event]) -> None:
         at = file.status_updated_at if file.status_updated_at is not None else now
         previous, status = tracked.status, file.status
-        if status in ACTIVE and previous in RESTING:
+        if status not in RESTING and previous in RESTING:
             tracked.work_started = at
         if status == "busy":
             tracked.busy_since = at

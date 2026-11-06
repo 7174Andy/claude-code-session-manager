@@ -118,6 +118,20 @@ def test_no_reply_clock_starts_once_and_stops_on_real_reply(tmp_path):
     assert tail.poll().unanswered_since is None
 
 
+def test_new_human_prompt_stops_a_clock_left_by_an_interrupted_turn(tmp_path):
+    assert tail_of(tmp_path, [api_request(T0), prompt("try again")]).unanswered_since is None
+
+
+def test_clock_restarts_from_the_request_after_a_new_prompt(tmp_path):
+    facts = tail_of(tmp_path, [api_request(T0), prompt("try again"), api_request(T2)])
+    assert facts.unanswered_since == T0_S + 180
+
+
+def test_tool_results_do_not_stop_the_clock(tmp_path):
+    facts = tail_of(tmp_path, [api_request(T0), prompt("result", kind="task-notification")])
+    assert facts.unanswered_since == T0_S
+
+
 def test_subagent_requests_do_not_start_the_clock(tmp_path):
     assert tail_of(tmp_path, [api_request(source="agent")]).unanswered_since is None
 
