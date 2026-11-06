@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Sessions</title>
+<style>
+  :root {
+    --bg: #1d2026; --raised: #262a31; --line: #3a404a; --text: #eceef1; --muted: #a7aeb9;
+    --need: #ffb454; --crash: #ff8a80; --done: #6fd08c; --stall: #e8c35a; --work: #8dbdff; --exp: #c3a6ff;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    display: flex; justify-content: space-between; gap: 12px; padding: 9px 14px;
+    border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px;
+  }
+  #warning {
+    display: none; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 8px 14px;
+    border-bottom: 1px solid var(--line); color: var(--crash); font-size: 13px;
+  }
+  #warning.shown { display: flex; }
+  #list { flex: 1; overflow-y: auto; }
+  .empty { padding: 16px 14px; color: var(--muted); }
+  .row { display: grid; gap: 3px; padding: 9px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .row:hover { background: var(--raised); }
+  .row:focus-visible, button:focus-visible { outline: 2px solid var(--work); outline-offset: -2px; }
+  .line { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .name { font: 600 13px Consolas, monospace; overflow-wrap: anywhere; min-width: 0; }
+  .time { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .badge { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+  .badge::before {
+    content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
+    border-radius: 50%; background: currentColor;
+  }
+  .recap { display: none; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .row.open .recap { display: block; }
+  button {
+    flex: none; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--raised); color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .kind-needs_you { color: var(--need); }
+  .kind-crashed { color: var(--crash); }
+  .kind-done { color: var(--done); }
+  .kind-no_reply { color: var(--stall); }
+  .kind-experiment { color: var(--exp); }
+  .kind-working { color: var(--work); }
+  .kind-starting, .kind-unknown { color: var(--muted); }
+</style>
+</head>
+<body>
+<header><span>Sessions</span><span id="attention">0 need attention</span></header>
+<div id="warning" role="alert"><span id="warning-text"></span><button type="button" id="warning-close">Dismiss</button></div>
+<div id="list"><div class="empty">No Claude Code sessions running</div></div>
+<script>
+  // Names and recaps come from transcripts and can contain anything, so every value goes
+  // in through textContent. Never build this page's markup from strings.
+  const list = document.getElementById("list");
+  const attention = document.getElementById("attention");
+  const warning = document.getElementById("warning");
+  const warningText = document.getElementById("warning-text");
+  const expanded = new Set();
+  let lastPayload = "";
+
+  function element(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function showWarning(text) {
+    warningText.textContent = text;
+    warning.classList.add("shown");
+  }
+
+  document.getElementById("warning-close").addEventListener("click", () => warning.classList.remove("shown"));
+
+  async function clearSession(key, button) {
+    button.disabled = true;
+    try {
+      const result = await window.pywebview.api.clear(key);
+      if (result && result.warning) showWarning(result.warning);
+    } catch (error) {
+      showWarning("Couldn't clear that session.");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function toggle(rowNode, key) {
+    if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
+    rowNode.classList.toggle("open", expanded.has(key));
+    rowNode.setAttribute("aria-expanded", String(expanded.has(key)));
+  }
+
+  function buildRow(row) {
+    const open = expanded.has(row.key);
+    const node = element("div", open ? "row open" : "row");
+    node.tabIndex = 0;
+    node.setAttribute("role", "button");
+    node.setAttribute("aria-expanded", String(open));
+
+    const top = element("div", "line");
+    top.append(element("span", "name", row.name), element("span", "time", row.time));
+
+    const bottom = element("div", "line");
+    const clear = element("button", "clear", "Clear");
+    clear.type = "button";
+    clear.addEventListener("click", (event) => {
+      event.stopPropagation();
+      clearSession(row.key, clear);
+    });
+    bottom.append(element("span", "badge kind-" + row.kind, row.badge), clear);
+
+    node.append(top, bottom, element("div", "recap", row.recap || "No recap yet"));
+    node.addEventListener("click", () => toggle(node, row.key));
+    node.addEventListener("keydown", (event) => {
+      if (event.target === node && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        toggle(node, row.key);
+      }
+    });
+    return node;
+  }
+
+  function render(payload) {
+    const serialized = JSON.stringify(payload);
+    if (serialized === lastPayload) return;
+    lastPayload = serialized;
+
+    attention.textContent = payload.attention + " need attention";
+    const keys = new Set(payload.rows.map((row) => row.key));
+    for (const key of [...expanded]) if (!keys.has(key)) expanded.delete(key);
+
+    const scroll = list.scrollTop;
+    if (payload.rows.length) {
+      list.replaceChildren(...payload.rows.map(buildRow));
+    } else {
+      list.replaceChildren(element("div", "empty", "No Claude Code sessions running"));
+    }
+    list.scrollTop = scroll;
+  }
+</script>
+</body>
+</html>

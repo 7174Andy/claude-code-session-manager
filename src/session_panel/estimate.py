@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from session_panel.transcript import TranscriptTail
+from session_panel.transcript import TranscriptFacts, TranscriptTail
 
 TURN_MIN_SAMPLES = 8
 EXPERIMENT_MIN_SAMPLES = 3
@@ -57,13 +57,30 @@ def experiment_key(command: str) -> str | None:
     return " ".join(kept)
 
 
+class ProjectScan:
+    """One reader per transcript in a project, so a run is never counted twice."""
+
+    def __init__(self, project_dir: Path) -> None:
+        self._dir = project_dir
+        self._tails: dict[str, TranscriptTail] = {}
+
+    def poll(self) -> ProjectHistory:
+        for path in self._dir.glob("*.jsonl"):
+            self._tails.setdefault(path.stem, TranscriptTail(path))
+        history = ProjectHistory()
+        for tail in self._tails.values():
+            facts = tail.poll()
+            history.turns_s.extend(facts.turn_durations_s)
+            for command, duration in facts.finished_background:
+                key = experiment_key(command)
+                if key:
+                    history.experiments_s.setdefault(key, []).append(duration)
+        return history
+
+    def facts(self, session_id: str) -> TranscriptFacts | None:
+        tail = self._tails.get(session_id)
+        return tail.facts if tail else None
+
+
 def scan_project(project_dir: Path) -> ProjectHistory:
-    history = ProjectHistory()
-    for path in project_dir.glob("*.jsonl"):
-        facts = TranscriptTail(path).poll()
-        history.turns_s.extend(facts.turn_durations_s)
-        for command, duration in facts.finished_background:
-            key = experiment_key(command)
-            if key:
-                history.experiments_s.setdefault(key, []).append(duration)
-    return history
+    return ProjectScan(project_dir).poll()

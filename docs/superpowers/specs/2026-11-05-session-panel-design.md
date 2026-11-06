@@ -104,3 +104,4 @@ Jumping to a session's terminal, sending prompts from the panel, phone alerts, l
 - A closed tab may still look alive until cleared.
 - These files are Claude Code internals, so an update could change them. Unknown values should display rather than crash.
 - Permission prompts are rare because the user runs in auto mode.
+- While Windows reports a fullscreen or busy state, notifications go silently to the notification center and don't pop up. Observed on 2026-11-05 with the state reporting busy; both test notifications were delivered to the history but neither appeared on screen.
