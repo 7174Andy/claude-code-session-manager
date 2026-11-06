@@ -10,3 +10,4 @@ It runs in the background with an icon by the clock, which shows how many sessio
 
 - Run: `uv run session-panel`
 - Test: `uv run pytest`
+- Lint: `uv run ruff check`

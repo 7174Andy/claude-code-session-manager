@@ -137,7 +137,7 @@ def test_left_click_opens_the_panel_and_session_lines_are_not_clickable():
 
 def test_menu_quit_calls_quit():
     quit_called = threading.Event()
-    tray, icon = make_tray(quit_called=quit_called)
+    _tray, icon = make_tray(quit_called=quit_called)
     next(item for item in menu_items(icon) if str(item.text) == "Quit")(icon)
     assert quit_called.wait(5)
 

@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psutil
@@ -93,7 +93,7 @@ def _expected_start(proc_start: str | None) -> float | None:
     except (TypeError, ValueError):
         pass
     try:
-        return datetime.strptime(proc_start, LSTART_FORMAT).replace(tzinfo=timezone.utc).timestamp()
+        return datetime.strptime(proc_start, LSTART_FORMAT).replace(tzinfo=UTC).timestamp()
     except (TypeError, ValueError):
         return None
 

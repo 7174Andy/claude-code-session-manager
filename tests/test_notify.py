@@ -1,4 +1,5 @@
 import sys
+from typing import ClassVar
 
 import pytest
 
@@ -43,7 +44,7 @@ def test_clean_keeps_korean_text():
 
 
 class _Recorder:
-    made = []
+    made: ClassVar[list] = []
 
     def __init__(self, app_id, title, msg, **kwargs):
         self.fields = (app_id, title, msg)

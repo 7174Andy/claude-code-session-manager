@@ -279,7 +279,7 @@ def test_two_live_processes_of_one_session_show_the_newest_and_alert_once(new_fi
     files = [new, old] if new_first else [old, new]
     tracker = seen(sf("other", 9))
     events = []
-    for i in range(0, 12):
+    for i in range(12):
         rows, more = tracker.update(obs(sf("other", 9), *files), NOW + i * 2)
         events += more
     assert [r.pid for r in rows if r.name == "s"] == [2]

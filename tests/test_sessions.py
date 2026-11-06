@@ -4,7 +4,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psutil
@@ -70,7 +70,7 @@ def lstart_of(pid):
 
 
 def test_mac_start_time_parses_a_space_padded_day_as_utc():
-    expected = datetime(2026, 11, 5, 12, 34, 56, tzinfo=timezone.utc).timestamp()
+    expected = datetime(2026, 11, 5, 12, 34, 56, tzinfo=UTC).timestamp()
     assert _expected_start("Thu Nov  5 12:34:56 2026") == expected
 
 
@@ -139,7 +139,7 @@ def _kill_all(parent, descendants):
 
 
 def test_denied_child_still_stops_the_session_and_reports_failure(tmp_path, monkeypatch):
-    parent, child = _parent_with_child(tmp_path)
+    parent, _child = _parent_with_child(tmp_path)
     descendants = psutil.Process(parent.pid).children(recursive=True)
     real_terminate = psutil.Process.terminate
 

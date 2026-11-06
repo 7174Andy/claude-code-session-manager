@@ -164,7 +164,7 @@ def test_page_behaviour():
             alert.events.loaded.wait(20)
             run_checks(window, api, out)
             run_alert_checks(alert, alert_api, out)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - any failure here must reach the assert on the main thread
             out["error"] = repr(error)
         finally:
             alert.destroy()
