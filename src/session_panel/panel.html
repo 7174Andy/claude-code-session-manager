@@ -32,8 +32,9 @@
   .row:hover { background: var(--raised); }
   .row:focus-visible, button:focus-visible { outline: 2px solid var(--work); outline-offset: -2px; }
   .line { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .line.top { flex-wrap: wrap; row-gap: 1px; }
   .name { font: 600 13px Consolas, monospace; overflow-wrap: anywhere; min-width: 0; }
-  .time { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .time { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
   .badge { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
   .badge::before {
     content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
@@ -83,6 +84,8 @@
 
   document.getElementById("warning-close").addEventListener("click", () => warning.classList.remove("shown"));
   document.getElementById("quit").addEventListener("click", () => window.pywebview.api.quit());
+  // Opening the window focuses its first button, which is Quit, so Enter would start quitting.
+  window.addEventListener("focus", () => document.activeElement.blur());
 
   async function clearSession(key, button) {
     button.disabled = true;
@@ -109,7 +112,7 @@
     node.setAttribute("role", "button");
     node.setAttribute("aria-expanded", String(open));
 
-    const top = element("div", "line");
+    const top = element("div", "line top");
     top.append(element("span", "name", row.name), element("span", "time", row.time));
 
     const bottom = element("div", "line");
