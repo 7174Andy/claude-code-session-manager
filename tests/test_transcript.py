@@ -1,0 +1,238 @@
+import json
+from datetime import datetime
+
+from session_panel.transcript import TranscriptFacts, TranscriptTail, find_transcript
+
+T0 = "2026-11-05T05:00:00.000Z"
+T0_S = datetime(2026, 11, 5, 5, 0, 0, tzinfo=datetime.fromisoformat(T0).tzinfo).timestamp()
+T1 = "2026-11-05T05:01:40.000Z"
+T2 = "2026-11-05T05:03:00.000Z"
+
+
+def away(text):
+    return {"type": "system", "subtype": "away_summary", "content": text, "timestamp": T0}
+
+
+def title(text):
+    return {"type": "ai-title", "aiTitle": text}
+
+
+def prompt(text, kind="human"):
+    return {"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": kind}, "timestamp": T0}
+
+
+def api_request(ts=T0, source="repl_main_thread"):
+    return {"type": "api-request", "timestamp": ts, "querySource": source}
+
+
+def reply(ts=T1):
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "message": {"model": "claude-opus-5-5", "content": [{"type": "text", "text": "hi"}]},
+    }
+
+
+def api_error(ts=T1, reason="connection_failed"):
+    return {
+        "type": "assistant",
+        "timestamp": ts,
+        "isApiErrorMessage": True,
+        "apiError": reason,
+        "error": "server_error",
+        "message": {"model": "<synthetic>", "content": [{"type": "text", "text": "API Error"}]},
+    }
+
+
+def turn_duration(ms):
+    return {"type": "system", "subtype": "turn_duration", "durationMs": ms, "timestamp": T0}
+
+
+def background(tool_id, command, ts=T0):
+    block = {
+        "type": "tool_use",
+        "id": tool_id,
+        "name": "PowerShell",
+        "input": {"command": command, "run_in_background": True},
+    }
+    return {"type": "assistant", "timestamp": ts, "message": {"model": "claude-opus-5-5", "content": [block]}}
+
+
+def notification(tool_id, status="completed", ts=T1):
+    content = f"<task-notification>\n<tool-use-id>{tool_id}</tool-use-id>\n<status>{status}</status>\n</task-notification>"
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": ts, "content": content}
+
+
+def write_lines(path, records):
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        for record in records:
+            handle.write(json.dumps(record) + "\n")
+
+
+def tail_of(tmp_path, records):
+    path = tmp_path / "t.jsonl"
+    write_lines(path, records)
+    return TranscriptTail(path).poll()
+
+
+def test_recap_strips_config_hint(tmp_path):
+    facts = tail_of(tmp_path, [away("Testing the runner. (disable recaps in /config)")])
+    assert facts.recap == "Testing the runner."
+
+
+def test_latest_recap_wins(tmp_path):
+    assert tail_of(tmp_path, [away("old"), away("new")]).recap == "new"
+
+
+def test_best_recap_prefers_recap_then_title_then_prompt():
+    assert TranscriptFacts(recap="r", title="t", last_prompt="p").best_recap() == "r"
+    assert TranscriptFacts(title="t", last_prompt="p").best_recap() == "t"
+    assert TranscriptFacts(last_prompt="p").best_recap() == "p"
+    assert TranscriptFacts().best_recap() == ""
+
+
+def test_title_is_read(tmp_path):
+    assert tail_of(tmp_path, [title("Fix camera")]).title == "Fix camera"
+
+
+def test_human_prompt_cut_to_80_chars(tmp_path):
+    assert tail_of(tmp_path, [prompt("x" * 200)]).last_prompt == "x" * 80
+
+
+def test_human_prompt_in_block_form(tmp_path):
+    record = prompt("")
+    record["message"]["content"] = [{"type": "text", "text": "hello"}]
+    assert tail_of(tmp_path, [record]).last_prompt == "hello"
+
+
+def test_only_human_prompts_count(tmp_path):
+    assert tail_of(tmp_path, [prompt("tool output", kind="task-notification")]).last_prompt is None
+
+
+def test_no_reply_clock_starts_once_and_stops_on_real_reply(tmp_path):
+    path = tmp_path / "t.jsonl"
+    write_lines(path, [api_request(T0), api_request(T1)])
+    tail = TranscriptTail(path)
+    assert tail.poll().unanswered_since == T0_S
+    write_lines(path, [reply(T2)])
+    assert tail.poll().unanswered_since is None
+
+
+def test_subagent_requests_do_not_start_the_clock(tmp_path):
+    assert tail_of(tmp_path, [api_request(source="agent")]).unanswered_since is None
+
+
+def test_api_errors_count_and_keep_clock_running(tmp_path):
+    facts = tail_of(tmp_path, [api_request(T0), api_error(T1), api_error(T2)])
+    assert (facts.api_error_count, facts.last_api_error) == (2, "connection_failed")
+    assert facts.unanswered_since == T0_S
+
+
+def test_real_reply_resets_api_errors(tmp_path):
+    facts = tail_of(tmp_path, [api_request(T0), api_error(T1), reply(T2)])
+    assert (facts.api_error_count, facts.last_api_error) == (0, None)
+
+
+def test_turn_durations_in_seconds(tmp_path):
+    assert tail_of(tmp_path, [turn_duration(1278626)]).turn_durations_s == [1278.626]
+
+
+def test_background_task_opens_then_finishes(tmp_path):
+    path = tmp_path / "t.jsonl"
+    write_lines(path, [background("toolu_1", "run --config a")])
+    tail = TranscriptTail(path)
+    task = tail.poll().open_background["toolu_1"]
+    assert (task.command, task.started_at) == ("run --config a", T0_S)
+    write_lines(path, [notification("toolu_1")])
+    facts = tail.poll()
+    assert facts.open_background == {}
+    assert facts.finished_background == [("run --config a", 100.0)]
+
+
+def test_failed_background_task_closes_without_a_sample(tmp_path):
+    facts = tail_of(tmp_path, [background("toolu_1", "run"), notification("toolu_1", status="failed")])
+    assert facts.open_background == {}
+    assert facts.finished_background == []
+
+
+def test_notification_for_unknown_task_is_ignored(tmp_path):
+    assert tail_of(tmp_path, [notification("toolu_9")]).finished_background == []
+
+
+def test_foreground_tool_is_not_tracked(tmp_path):
+    record = background("toolu_1", "run")
+    record["message"]["content"][0]["input"]["run_in_background"] = False
+    assert tail_of(tmp_path, [record]).open_background == {}
+
+
+def test_poll_reads_incrementally(tmp_path):
+    path = tmp_path / "t.jsonl"
+    write_lines(path, [turn_duration(1000), title("kept")])
+    tail = TranscriptTail(path)
+    tail.poll()
+    write_lines(path, [turn_duration(2000)])
+    facts = tail.poll()
+    assert facts.turn_durations_s == [1.0, 2.0]
+    assert facts.title == "kept"
+
+
+def test_partial_last_line_waits_for_newline(tmp_path):
+    path = tmp_path / "t.jsonl"
+    line = json.dumps(title("whole"))
+    path.write_bytes(line[:10].encode())
+    tail = TranscriptTail(path)
+    assert tail.poll().title is None
+    with path.open("ab") as handle:
+        handle.write(line[10:].encode() + b"\n")
+    assert tail.poll().title == "whole"
+
+
+def test_malformed_lines_are_skipped(tmp_path):
+    path = tmp_path / "t.jsonl"
+    path.write_text('{"type":"ai-title","aiTi\n[1]\n"ai-title"\n')
+    write_lines(path, [title("good")])
+    assert TranscriptTail(path).poll().title == "good"
+
+
+def test_records_with_unexpected_shapes_are_skipped(tmp_path):
+    records = [
+        {"type": "assistant", "message": "not a dict"},
+        {"type": "assistant", "message": {"model": "m", "content": "text form"}},
+        {"type": "system", "subtype": "turn_duration", "durationMs": "soon"},
+        {"type": "queue-operation", "content": None},
+        {"type": "api-request", "querySource": "repl_main_thread", "timestamp": "garbage"},
+        title("after"),
+    ]
+    assert tail_of(tmp_path, records).title == "after"
+
+
+def test_non_utf8_bytes_do_not_stop_reading(tmp_path):
+    path = tmp_path / "t.jsonl"
+    path.write_bytes(b'{"type":"ai-title","aiTitle":"\xff"}\n')
+    write_lines(path, [title("good")])
+    assert TranscriptTail(path).poll().title == "good"
+
+
+def test_unknown_record_types_are_ignored(tmp_path):
+    assert tail_of(tmp_path, [{"type": "brand-new", "aiTitle": "no"}]).title is None
+
+
+def test_truncated_file_restarts_from_zero(tmp_path):
+    path = tmp_path / "t.jsonl"
+    write_lines(path, [turn_duration(1000), turn_duration(2000)])
+    tail = TranscriptTail(path)
+    tail.poll()
+    path.write_text(json.dumps(turn_duration(3000)) + "\n")
+    assert tail.poll().turn_durations_s == [3.0]
+
+
+def test_missing_file_gives_empty_facts(tmp_path):
+    assert TranscriptTail(tmp_path / "gone.jsonl").poll() == TranscriptFacts()
+
+
+def test_find_transcript(tmp_path):
+    project = tmp_path / "C--x"
+    project.mkdir()
+    (project / "abc.jsonl").write_text("")
+    assert find_transcript(tmp_path, "abc") == project / "abc.jsonl"
+    assert find_transcript(tmp_path, "nope") is None
