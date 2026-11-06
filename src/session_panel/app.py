@@ -1,12 +1,10 @@
 """Wire Claude's files, the tracker, the page and notifications together."""
 
-import ctypes
 import json
 import logging
 import threading
 import time
 from collections.abc import Callable
-from ctypes import wintypes
 from importlib import resources
 from pathlib import Path
 
@@ -29,10 +27,6 @@ ALERT_HEIGHT = 110
 ALERT_MARGIN = 16
 ALERT_BOTTOM = 64
 ALERT_SECONDS = 10
-HWND_TOPMOST = -1
-HWND_NOTOPMOST = -2
-SWP_NOSIZE = 0x0001
-SWP_NOMOVE = 0x0002
 
 log = logging.getLogger(__name__)
 
@@ -200,34 +194,19 @@ class Alerts:
 class AlertApi:
     """What the alert page may call. Public members are exposed to the page."""
 
-    def __init__(self, panel, alerts: Alerts, raise_panel: Callable[[], None]) -> None:
+    def __init__(self, panel, alerts: Alerts) -> None:
         self._panel = panel
         self._alerts = alerts
-        self._raise_panel = raise_panel
 
     def open(self) -> None:
+        # Don't set panel.on_top here: pywebview does that off the window's thread while holding
+        # Python's lock, which the window's thread also needs, so the whole app can freeze.
         self._panel.restore()
         self._panel.show()
-        # Restoring alone can leave it behind a fullscreen window, so raise it past that.
-        self._raise_panel()
         self._alerts.dismiss()
 
     def dismiss(self) -> None:
         self._alerts.dismiss()
-
-
-def raise_native_window(hwnd: int) -> None:
-    """Move a window above everything, then let others go on top of it again.
-
-    Not pywebview's window.on_top: it sets the property off the window's thread while holding
-    Python's lock, and the window's thread needs that lock too, so the whole app can freeze.
-    ctypes releases the lock during the call.
-    """
-    user32 = ctypes.WinDLL("user32")
-    set_window_pos = user32.SetWindowPos
-    set_window_pos.argtypes = [wintypes.HWND, wintypes.HWND, *[ctypes.c_int] * 4, wintypes.UINT]
-    for position in (HWND_TOPMOST, HWND_NOTOPMOST):
-        set_window_pos(hwnd, position, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE)
 
 
 def deliver(
@@ -340,7 +319,7 @@ def main() -> None:
         **alert_geometry(screen.width, screen.height),
     )
     alerts = Alerts(alert_window)
-    alert_api = AlertApi(window, alerts, lambda: raise_native_window(window.native.Handle.ToInt64()))
+    alert_api = AlertApi(window, alerts)
     alert_window.expose(alert_api.open, alert_api.dismiss)
     tray = Tray(alert_api.open, quit_app)
     collector = Collector(Path.home() / ".claude")

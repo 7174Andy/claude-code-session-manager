@@ -190,14 +190,14 @@ def test_clicking_an_alert_opens_the_panel_and_dismisses():
     alerts = Alerts(alert)
     alerts.show(Event("t", "b"), NOW)
     alert.calls.clear()
-    AlertApi(panel, alerts, lambda: panel.calls.append("raised")).open()
-    # Never panel.on_top: pywebview sets it off the window's thread, which can freeze the app.
-    assert panel.calls == ["restore", "show", "raised"]
+    AlertApi(panel, alerts).open()
+    # Exactly these: pywebview's on_top setter runs off the window's thread and can freeze the app.
+    assert panel.calls == ["restore", "show"]
     assert alert.calls == ["hide", "resetAlert()"]
 
 
 def test_alert_api_exposes_only_open_and_dismiss():
-    api = AlertApi(FakeWindow(), Alerts(FakeWindow()), lambda: None)
+    api = AlertApi(FakeWindow(), Alerts(FakeWindow()))
     assert [n for n in dir(api) if not n.startswith("_")] == ["dismiss", "open"]
 
 

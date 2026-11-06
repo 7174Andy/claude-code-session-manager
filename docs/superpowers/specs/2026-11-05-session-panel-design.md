@@ -65,7 +65,7 @@ Estimating from simulated time is left out because a run's end time could not be
 
 ## Notifications
 
-Every notification is sent as a standard Windows toast. When Windows reports any state other than accepting notifications, such as during fullscreen, it holds toasts back, so the app also shows its own alert: a small always-on-top window in the bottom-right corner, for 10 seconds, that doesn't take focus. Clicking it brings the panel to the front; `✕` dismisses it. Alerts arriving together show the newest with `and N more`.
+Every notification is sent as a standard Windows toast. When Windows reports any state other than accepting notifications, such as during fullscreen, it holds toasts back, so the app also shows its own alert: a small always-on-top window in the bottom-right corner, for 10 seconds, that doesn't take focus. Clicking it opens the panel as a normal window, which isn't forced in front of other apps; `✕` dismisses it. Alerts arriving together show the newest with `and N more`.
 
 - **Done:** moving to `idle` after at least 120 seconds of work. Work starts when a session leaves `idle`, and `shell` counts as still working. Title `<name> is done`, body `Ran 14 min. <recap>`.
 - **Crashed:** title `<name> crashed`, body is the recap.

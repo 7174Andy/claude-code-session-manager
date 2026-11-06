@@ -95,9 +95,7 @@ def run_checks(window, api, out):
     js("document.getElementById('quit').click()")
     out["quit_reached_api"] = _wait_true(lambda: getattr(api, "quit_calls", 0) == 1)
 
-    js("document.getElementById('quit').focus()")
-    js("window.dispatchEvent(new Event('focus'))")
-    out["quit_focused_after_window_focus"] = js("document.activeElement.id === 'quit'")
+    out["first_focus_stop"] = js("document.querySelector('button, [tabindex=\"0\"]').id")
 
     render(0, [row("w", "isaac-sim-2b", time_text="no reliable estimate, running 33 min")])
     out["name_height"] = js("document.querySelector('.name').offsetHeight")
@@ -208,6 +206,6 @@ def test_page_behaviour():
     assert out["evil_img"] == 0
     assert out["evil_ran"] is False
     assert out["quit_reached_api"] is True
-    assert out["quit_focused_after_window_focus"] is False
+    assert out["first_focus_stop"] == "first-focus"
     assert out["name_height"] < 25, "a short name must not wrap beside a long time"
     assert out["time_height"] < 25, "a long time must fit on its own line"

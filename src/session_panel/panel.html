@@ -21,6 +21,7 @@
     border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px;
   }
   #attention { margin-left: auto; }
+  #first-focus { outline: none; }
   #warning {
     display: none; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 8px 14px;
     border-bottom: 1px solid var(--line); color: var(--crash); font-size: 13px;
@@ -57,6 +58,8 @@
 </style>
 </head>
 <body>
+<!-- Opening the window focuses the first focusable element. This keeps that off Quit. -->
+<div id="first-focus" tabindex="0"></div>
 <header><span>Sessions</span><span id="attention">0 need attention</span><button type="button" id="quit">Quit</button></header>
 <div id="warning" role="alert"><span id="warning-text"></span><button type="button" id="warning-close">Dismiss</button></div>
 <div id="list"><div class="empty">No Claude Code sessions running</div></div>
@@ -84,9 +87,6 @@
 
   document.getElementById("warning-close").addEventListener("click", () => warning.classList.remove("shown"));
   document.getElementById("quit").addEventListener("click", () => window.pywebview.api.quit());
-  // Opening the window focuses its first button, which is Quit, so Enter would start quitting.
-  window.addEventListener("focus", () => document.activeElement.blur());
-
   async function clearSession(key, button) {
     button.disabled = true;
     try {
