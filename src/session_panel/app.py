@@ -329,7 +329,11 @@ def main() -> None:
     collector = Collector(Path.home() / ".claude")
     tray.start()
     try:
-        webview.start(_poll_loop, (window, alert_window, alerts, tray, collector, controller, state_path))
+        webview.start(
+            _poll_loop,
+            (window, alert_window, alerts, tray, collector, controller, state_path),
+            icon=str(resources.files("session_panel").joinpath("icon.ico")),
+        )
     finally:
         tray.stop()
     # On macOS, pywebview's thread answering the Quit click waits forever once the windows have
