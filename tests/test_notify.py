@@ -62,6 +62,25 @@ def test_send_toast_cleans_text(monkeypatch):
     assert _Recorder.made == [("Claude Sessions", "x is done", "Ran 3 min. bad")]
 
 
+def test_toast_click_goes_to_the_sessions_window(monkeypatch):
+    winotify = pytest.importorskip("winotify")
+    launched = []
+
+    class Toast:
+        def __init__(self, launch, **kwargs):
+            launched.append(launch)
+
+        def show(self):
+            pass
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(winotify, "Notification", Toast)
+    monkeypatch.setattr(notify, "focus_url", lambda cwd: {"/proj": "vscode://file/proj"}.get(cwd))
+    send_toast(Event("t", "b", "/proj"))
+    send_toast(Event("t", "b", "/no-window"))
+    assert launched == ["vscode://file/proj", ""]
+
+
 def test_send_toast_swallows_errors(monkeypatch):
     winotify = pytest.importorskip("winotify")
 

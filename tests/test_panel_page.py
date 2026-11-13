@@ -19,11 +19,16 @@ def row(key, name, recap="Recap text", kind="working", time_text="10–15 min le
 class FakeApi:
     def __init__(self):
         self.cleared = []
+        self.focused = []
         self.warning = None
 
     def clear(self, key):
         self.cleared.append(key)
         return {"warning": self.warning}
+
+    def focus(self, key):
+        self.focused.append(key)
+        return True
 
     def quit(self):
         self.quit_calls = getattr(self, "quit_calls", 0) + 1
@@ -60,11 +65,14 @@ def run_checks(window, api, out):
     recap_visible = "getComputedStyle(document.querySelector('.row .recap')).display !== 'none'"
     out["recap_start"] = js(recap_visible)
     js("document.querySelector('.row').click()")
+    out["row_click_focused"] = _wait_true(lambda: api.focused == ["a"])
+    out["row_click_did_not_toggle"] = not js(recap_visible)
+    js("document.querySelector('.recap-toggle').click()")
     out["recap_clicked"] = js(recap_visible)
     render(1, [row("a", "alpha", time_text="9–14 min left"), row("b", "beta", kind="done")])
     out["recap_after_render"] = js(recap_visible)
     out["time_after_render"] = js("document.querySelector('.time').textContent")
-    js("document.querySelector('.row').click()")
+    js("document.querySelector('.recap-toggle').click()")
     out["recap_clicked_again"] = js(recap_visible)
 
     many = [row(f"k{i}", f"name{i}") for i in range(40)]
@@ -78,6 +86,7 @@ def run_checks(window, api, out):
     js("document.querySelector('.clear').click()")
     out["clear_reached_api"] = wait_for(window, "true") and _wait_true(lambda: api.cleared == ["a"])
     out["clear_did_not_toggle"] = not js(recap_visible)
+    out["buttons_did_not_focus"] = api.focused == ["a"]
 
     api.warning = "Couldn't stop alpha. Close it in its terminal."
     render(0, [row("a2", "alpha2")])
@@ -86,7 +95,7 @@ def run_checks(window, api, out):
     out["warning_visible"] = js("getComputedStyle(document.getElementById('warning')).display !== 'none'")
 
     render(0, [row("e", EVIL, recap=EVIL)])
-    js("document.querySelector('.row').click()")
+    js("document.querySelector('.recap-toggle').click()")
     time.sleep(0.3)
     out["evil_name"] = js("document.querySelector('.name').textContent")
     out["evil_recap"] = js("document.querySelector('.recap').textContent")
@@ -117,7 +126,7 @@ class FakeAlertApi:
         self.opened = 0
         self.dismissed = 0
 
-    def open(self):
+    def go(self):
         self.opened += 1
 
     def dismiss(self):
@@ -131,7 +140,7 @@ def run_alert_checks(window, api, out):
     def show(title, body):
         js(f"showAlert({json.dumps({'title': title, 'body': body})})")
 
-    wait_for(window, "!!(window.pywebview && window.pywebview.api && window.pywebview.api.open)")
+    wait_for(window, "!!(window.pywebview && window.pywebview.api && window.pywebview.api.go)")
     show("alpha is done", "Ran 3 min.")
     out["alert_title"] = js("document.getElementById('title').textContent")
     out["alert_body"] = js("document.getElementById('body').textContent")
@@ -201,6 +210,8 @@ def test_page_behaviour():
     assert out["time"] == "10–15 min left"
     assert "kind-done" in out["badge_class"]
     assert out["recap_start"] is False
+    assert out["row_click_focused"] is True
+    assert out["row_click_did_not_toggle"] is True
     assert out["recap_clicked"] is True
     assert out["recap_after_render"] is True
     assert out["time_after_render"] == "9–14 min left"
@@ -209,6 +220,7 @@ def test_page_behaviour():
     assert out["scroll_after_render"] == 200
     assert out["clear_reached_api"] is True
     assert out["clear_did_not_toggle"] is True
+    assert out["buttons_did_not_focus"] is True
     assert out["warning_shown"] is True
     assert out["warning_visible"] is True
     assert out["evil_name"] == EVIL

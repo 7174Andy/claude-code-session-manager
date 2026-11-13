@@ -12,6 +12,7 @@ from pathlib import Path
 import webview
 
 from session_panel.estimate import ProjectScan
+from session_panel.focus import focus_window
 from session_panel.model import Event, Observation, Row, Tracker, need_attention_count
 from session_panel.notify import accepts_toasts, send_toast
 from session_panel.sessions import is_alive, read_session_files, stop_session
@@ -113,6 +114,11 @@ class Controller:
         with self._lock:
             return self._tracker.snapshot()
 
+    def cwd(self, key: str) -> str:
+        with self._lock:
+            row = self._rows.get(key)
+        return row.cwd if row else ""
+
     def clear(self, key: str) -> str | None:
         """Clear a row, stopping its process if the user agrees. Returns a warning to show."""
         with self._lock:
@@ -159,14 +165,24 @@ class AppLifetime:
 class PanelApi:
     """What the page may call. Public members are exposed to the page, so keep this short."""
 
-    def __init__(self, controller: Controller, quit_app: Callable[[], None] = lambda: None) -> None:
+    def __init__(
+        self,
+        controller: Controller,
+        quit_app: Callable[[], None] = lambda: None,
+        focus: Callable[[str], bool] = focus_window,
+    ) -> None:
         self._controller = controller
         self._quit_app = quit_app
+        self._focus = focus
 
     def clear(self, key) -> dict:
         if not isinstance(key, str):
             return {"warning": None}
         return {"warning": self._controller.clear(key)}
+
+    def focus(self, key) -> bool:
+        """Raise the session's VS Code window. Does nothing if no open window holds it."""
+        return isinstance(key, str) and self._focus(self._controller.cwd(key))
 
     def quit(self) -> None:
         self._quit_app()
@@ -178,12 +194,14 @@ class Alerts:
     def __init__(self, window) -> None:
         self._window = window
         self._until: float | None = None
+        self.cwd = ""  # of the session the alert on show is about
 
     def show(self, event: Event, now: float) -> None:
         payload = {"title": event.title, "body": event.body}
         self._window.evaluate_js(f"showAlert({json.dumps(payload)})")
         self._window.show()
         self._until = now + ALERT_SECONDS
+        self.cwd = event.cwd
 
     def tick(self, now: float) -> None:
         if self._until is not None and now >= self._until:
@@ -198,9 +216,10 @@ class Alerts:
 class AlertApi:
     """What the alert page may call. Public members are exposed to the page."""
 
-    def __init__(self, panel, alerts: Alerts) -> None:
+    def __init__(self, panel, alerts: Alerts, focus: Callable[[str], bool] = focus_window) -> None:
         self._panel = panel
         self._alerts = alerts
+        self._focus = focus
 
     def open(self) -> None:
         # Don't set panel.on_top here: pywebview does that off the window's thread while holding
@@ -208,6 +227,13 @@ class AlertApi:
         self._panel.restore()
         self._panel.show()
         self._alerts.dismiss()
+
+    def go(self) -> None:
+        """A click on the alert: raise the session's VS Code window, or the panel if it has none."""
+        if self._focus(self._alerts.cwd):
+            self._alerts.dismiss()
+        else:
+            self.open()
 
     def dismiss(self) -> None:
         self._alerts.dismiss()
@@ -324,7 +350,7 @@ def main() -> None:
     )
     alerts = Alerts(alert_window)
     alert_api = AlertApi(window, alerts)
-    alert_window.expose(alert_api.open, alert_api.dismiss)
+    alert_window.expose(alert_api.go, alert_api.dismiss)
     tray = Tray(alert_api.open, lifetime.quit_now)
     collector = Collector(Path.home() / ".claude")
     tray.start()
