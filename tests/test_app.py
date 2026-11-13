@@ -206,9 +206,29 @@ def test_clicking_an_alert_opens_the_panel_and_dismisses():
     assert alert.calls == ["hide", "resetAlert()"]
 
 
-def test_alert_api_exposes_only_open_and_dismiss():
+def test_alert_api_exposes_only_open_go_and_dismiss():
     api = AlertApi(FakeWindow(), Alerts(FakeWindow()))
-    assert [n for n in dir(api) if not n.startswith("_")] == ["dismiss", "open"]
+    assert [n for n in dir(api) if not n.startswith("_")] == ["dismiss", "go", "open"]
+
+
+def test_clicking_an_alert_goes_to_the_sessions_window_when_it_has_one():
+    panel, alert = FakeWindow(), FakeWindow()
+    alerts = Alerts(alert)
+    alerts.show(Event("t", "b", "/proj"), NOW)
+    alert.calls.clear()
+    asked = []
+    AlertApi(panel, alerts, focus=lambda cwd: asked.append(cwd) or True).go()
+    assert asked == ["/proj"]
+    assert panel.calls == []
+    assert alert.calls == ["hide", "resetAlert()"]
+
+
+def test_clicking_an_alert_without_a_window_opens_the_panel():
+    panel, alert = FakeWindow(), FakeWindow()
+    alerts = Alerts(alert)
+    alerts.show(Event("t", "b", "/proj"), NOW)
+    AlertApi(panel, alerts, focus=lambda cwd: False).go()
+    assert panel.calls == ["restore", "show"]
 
 
 def _deliver(accepts):
@@ -299,6 +319,16 @@ def test_clear_does_not_raise_a_crash_alert_while_stopping():
     assert events_during_stop == []
 
 
-def test_panel_api_exposes_only_clear_and_quit():
+def test_panel_api_exposes_only_clear_focus_and_quit():
     controller, _ = controller_with_row(Fakes())
-    assert [n for n in dir(PanelApi(controller)) if not n.startswith("_")] == ["clear", "quit"]
+    assert [n for n in dir(PanelApi(controller)) if not n.startswith("_")] == ["clear", "focus", "quit"]
+
+
+def test_clicking_a_row_asks_for_that_sessions_folder():
+    controller, file = controller_with_row(Fakes())
+    asked = []
+    api = PanelApi(controller, focus=lambda cwd: asked.append(cwd) or True)
+    assert api.focus(file.key) is True
+    assert asked == [file.cwd]
+    assert api.focus(None) is False
+    assert asked == [file.cwd]
