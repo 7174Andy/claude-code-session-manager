@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 from session_panel.estimate import (
@@ -69,12 +69,14 @@ class Row:
     pid: int
     proc_start: str | None
     alive: bool
+    cwd: str = ""
 
 
 @dataclass
 class Event:
     title: str
     body: str
+    cwd: str = field(default="", compare=False)  # where the session runs, to jump to its window
 
 
 def need_attention_count(rows: list[Row]) -> int:
@@ -97,6 +99,7 @@ class _Tracked:
     crashed: bool = False
     waiting_notified: bool = False
     recap: str = ""
+    cwd: str = ""
 
 
 def _minutes(seconds: float) -> int:
@@ -193,6 +196,7 @@ class Tracker:
             tracked = _Tracked(file.key, file.session_id, file.name, file.pid, file.proc_start)
             self._sessions[file.key] = tracked
         tracked.name = file.name
+        tracked.cwd = file.cwd
 
         facts = obs.facts.get(file.session_id)
         if facts and facts.best_recap():
@@ -222,7 +226,7 @@ class Tracker:
                 worked = at - tracked.work_started
                 if worked >= DONE_MIN_WORK_S:
                     body = f"Ran {_minutes(worked)} min. {tracked.recap}".strip()
-                    events.append(Event(f"{tracked.name} is done", body))
+                    events.append(Event(f"{tracked.name} is done", body, tracked.cwd))
         tracked.status = status
         tracked.status_since = at
 
@@ -236,7 +240,7 @@ class Tracker:
         if tracked.status in ACTIVE:
             tracked.crashed = True
             tracked.ended_at = now
-            events.append(Event(f"{tracked.name} crashed", tracked.recap))
+            events.append(Event(f"{tracked.name} crashed", tracked.recap, tracked.cwd))
         elif tracked.ended_at is None:
             tracked.ended_at = now
 
@@ -259,7 +263,7 @@ class Tracker:
         elif now - tracked.status_since >= WAITING_NOTIFY_S:
             tracked.waiting_notified = True
             reason = next((f.waiting_for for f in obs.files if f.key == tracked.key), None)
-            events.append(Event(f"{tracked.name} needs you", reason or ""))
+            events.append(Event(f"{tracked.name} needs you", reason or "", tracked.cwd))
 
     def _row(self, tracked: _Tracked, obs: Observation, now: float) -> tuple[Row, float]:
         facts = obs.facts.get(tracked.session_id) or TranscriptFacts()
@@ -279,6 +283,7 @@ class Tracker:
             tracked.pid,
             tracked.proc_start,
             not tracked.gone,
+            tracked.cwd,
         )
         return row, soonest
 

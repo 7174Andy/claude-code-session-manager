@@ -56,7 +56,7 @@
     more.textContent = "";
   }
 
-  document.getElementById("alert").addEventListener("click", () => window.pywebview.api.open());
+  document.getElementById("alert").addEventListener("click", () => window.pywebview.api.go());
   document.getElementById("close").addEventListener("click", (event) => {
     event.stopPropagation();
     window.pywebview.api.dismiss();

@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 
+from session_panel.focus import focus_url
+
 APP_ID = "Claude Sessions"
 PLACEHOLDER = "No recap yet"
 
@@ -51,19 +53,21 @@ def _applescript_text(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _show(title: str, body: str) -> None:
+def _show(title: str, body: str, launch: str = "") -> None:
     if sys.platform == "darwin":
         script = f"display notification {_applescript_text(body)} with title {_applescript_text(title)}"
         subprocess.run(["osascript", "-e", script], check=True, capture_output=True, timeout=10)
     else:
         import winotify  # only installed on Windows
 
-        winotify.Notification(app_id=APP_ID, title=title, msg=body).show()
+        winotify.Notification(app_id=APP_ID, title=title, msg=body, launch=launch).show()
 
 
 def send_toast(event) -> None:
     """Show a notification. A failure is logged, never raised: the panel must keep running."""
     try:
-        _show(clean_toast_text(event.title), clean_toast_text(event.body))
+        # A click on the Windows notification raises the session's VS Code window.
+        # macOS notifications can't carry a link.
+        _show(clean_toast_text(event.title), clean_toast_text(event.body), focus_url(event.cwd) or "")
     except Exception:
         log.exception("Could not show notification")

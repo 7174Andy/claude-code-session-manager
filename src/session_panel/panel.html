@@ -37,7 +37,7 @@
   .line.top { flex-wrap: wrap; row-gap: 1px; }
   .name { font: 600 13px Consolas, monospace; overflow-wrap: anywhere; min-width: 0; }
   .time { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-  .badge { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+  .badge { margin-right: auto; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
   .badge::before {
     content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
     border-radius: 50%; background: currentColor;
@@ -100,10 +100,10 @@
     }
   }
 
-  function toggle(rowNode, key) {
+  function toggle(rowNode, key, button) {
     if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
     rowNode.classList.toggle("open", expanded.has(key));
-    rowNode.setAttribute("aria-expanded", String(expanded.has(key)));
+    button.setAttribute("aria-expanded", String(expanded.has(key)));
   }
 
   function buildRow(row) {
@@ -111,7 +111,7 @@
     const node = element("div", open ? "row open" : "row");
     node.tabIndex = 0;
     node.setAttribute("role", "button");
-    node.setAttribute("aria-expanded", String(open));
+    node.title = "Go to this session's VS Code window";
 
     const top = element("div", "line top");
     top.append(element("span", "name", row.name), element("span", "time", row.time));
@@ -123,14 +123,22 @@
       event.stopPropagation();
       clearSession(row.key, clear);
     });
-    bottom.append(element("span", "badge kind-" + row.kind, row.badge), clear);
+    const recap = element("button", "recap-toggle", "Recap");
+    recap.type = "button";
+    recap.setAttribute("aria-expanded", String(open));
+    recap.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggle(node, row.key, recap);
+    });
+    bottom.append(element("span", "badge kind-" + row.kind, row.badge), recap, clear);
 
     node.append(top, bottom, element("div", "recap", row.recap || "No recap yet"));
-    node.addEventListener("click", () => toggle(node, row.key));
+    const goTo = () => window.pywebview.api.focus(row.key);
+    node.addEventListener("click", goTo);
     node.addEventListener("keydown", (event) => {
       if (event.target === node && (event.key === "Enter" || event.key === " ")) {
         event.preventDefault();
-        toggle(node, row.key);
+        goTo();
       }
     });
     return node;
